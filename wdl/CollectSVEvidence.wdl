@@ -104,6 +104,7 @@ task RunCollectSVEvidence {
     export GATK_LOCAL_JAR=~{default="/root/gatk.jar" gatk_jar_override}
 
     /gatk/gatk --java-options "-Xmx~{command_mem_mb}m" CollectSVEvidence \
+        --read-filter NonZeroReferenceLengthAlignmentReadFilter \
         -I "~{bam_or_cram_file}" \
         --sample-name "~{sample_id}" \
         -F "~{sd_locs_vcf}" \
