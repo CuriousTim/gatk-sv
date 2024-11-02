@@ -69,7 +69,7 @@ task RdTestPlot {
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
   command <<<
     set -euxo pipefail
-    curl --output RdTestV2.R --location "${script}"
+    curl --output RdTestV2.R --location "~{script}"
 
     if [[ ~{vcf_or_bed} == *.vcf.gz ]]; then
       # Subset to DEL/DUP above min size and covert to bed format
