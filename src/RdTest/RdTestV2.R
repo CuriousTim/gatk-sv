@@ -11,6 +11,12 @@
 # Update August 2015 (for incorporation into Holmes liWGS-SV 1.0)
 #---------------------------
 
+dump_and_quit <- function() {
+    dump.frames(to.file = TRUE)
+    quit(status = 1)
+}
+options(error = dump_and_quit)
+
 #Loads required packages; installs if necessary
 RPackages <- c("optparse", "plyr", "MASS", "zoo","methods","metap", "e1071", "fpc", "BSDA", "DAAG", "pwr", "reshape", "perm", "hash")
 for (i in RPackages)
