@@ -106,10 +106,10 @@ task RdTestPlot {
       i=$((i+1))
     done<~{write_lines(rd_files)}
 
-    Rscript /opt/RdTest/RdTestV2.R \
+    Rscript /opt/RdTest/RdTest.R \
       -b cnvs.bed \
       -n ~{prefix} \
-      -x rd_subsets \
+      -c rd_subsets \
       -m median_file.txt \
       -f ~{ped_file} \
       -p TRUE \
