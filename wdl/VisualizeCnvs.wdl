@@ -15,7 +15,6 @@ workflow VisualizeCnvs {
     File ped_file
     Int min_size
     String flags
-    String script
     String sv_pipeline_docker
     RuntimeAttr? runtime_attr_rdtest
   }
@@ -34,13 +33,11 @@ workflow VisualizeCnvs {
       prefix=prefix,
       min_size=min_size,
       flags=flags,
-      script=script,
       sv_pipeline_docker=sv_pipeline_docker,
       runtime_attr_override = runtime_attr_rdtest
   }
   output{
     File rdtest_plots = RdTestPlot.plots
-    File? dump = RdTestPlot.dump
   }
 }
 
@@ -55,7 +52,6 @@ task RdTestPlot {
     String prefix
     String sv_pipeline_docker
     String flags
-    String script
     RuntimeAttr? runtime_attr_override
   }
   RuntimeAttr default_attr = object {
@@ -69,7 +65,6 @@ task RdTestPlot {
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
   command <<<
     set -euxo pipefail
-    curl --output RdTestV2.R --location "~{script}"
 
     if [[ ~{vcf_or_bed} == *.vcf.gz ]]; then
       # Subset to DEL/DUP above min size and covert to bed format
@@ -111,7 +106,7 @@ task RdTestPlot {
       i=$((i+1))
     done<~{write_lines(rd_files)}
 
-    Rscript RdTestV2.R \
+    Rscript /opt/RdTest/RdTest.R \
       -b cnvs.bed \
       -n ~{prefix} \
       -x rd_subsets \
@@ -128,7 +123,6 @@ task RdTestPlot {
 
   output {
     File plots = "~{prefix}_rd_plots.tar.gz"
-    File? dump = "last.dump.rda"
   }
 
   runtime {
