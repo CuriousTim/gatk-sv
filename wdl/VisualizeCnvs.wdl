@@ -109,7 +109,7 @@ task RdTestPlot {
     Rscript /opt/RdTest/RdTest.R \
       -b cnvs.bed \
       -n ~{prefix} \
-      -x rd_subsets \
+      -c rd_subsets \
       -m median_file.txt \
       -f ~{ped_file} \
       -p TRUE \
