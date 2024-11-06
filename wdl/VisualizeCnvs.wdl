@@ -234,7 +234,7 @@ task RdTestPlot {
       -b '~{variants}' \
       -n ~{prefix} \
       -x rd_matrices \
-      -m medians.txt \
+      -m '~{medians}' \
       -f '~{ped_file}' \
       -p TRUE \
       -w '~{sample_ids}' \
