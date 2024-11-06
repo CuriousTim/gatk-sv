@@ -124,7 +124,7 @@ task ShardVariants {
   RuntimeAttr default_attr = object {
     cpu_cores: 1,
     mem_gb: 4,
-    disk_gb: ceil(size(vcf_or_bed, "GB") * 5) + 16,
+    disk_gb: ceil(size(vcf_or_bed, "GB") * 10) + 16,
     boot_disk_gb: 16,
     preemptible_tries: 3,
     max_retries: 1
@@ -155,9 +155,10 @@ task ShardVariants {
     }
     if [[ '~{vcf_or_bed}' == *.vcf.gz ]]; then
       bcftools view --include '(SVTYPE == "DEL" || SVTYPE == "DUP") && SVLEN >= ~{min_size}' '~{vcf_or_bed}' \
-        | svtk vcf2bed stdin \
-        | awk -F'\t' -v OFS='\t' '{print $1,$2,$3,$4,$6,$5}' \
+        | svtk vcf2bed stdin raw.bed
+      awk -F'\t' -v OFS='\t' '{print $1,$2,$3,$4,$6,$5}' raw.bed \
         | LC_ALL=C sort -k1,1 -k2,2n > cnvs.bed
+      rm raw.bed
       bcftools query --list-samples '~{vcf_or_bed}' > samples.txt
     elif [[ '~{vcf_or_bed}' == *.bed || '~{vcf_or_bed}' == *.bed.gz ]]; then
       cat2 '~{vcf_or_bed}' \
