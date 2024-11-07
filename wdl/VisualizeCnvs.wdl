@@ -24,7 +24,7 @@ workflow VisualizeCnvs {
   }
 
   scatter (file in rd_files) {
-    File rd_file_indexes = file + ".tbi"
+    File rd_file_indicies = file + ".tbi"
   }
 
   call ShardVariants {
@@ -47,8 +47,8 @@ workflow VisualizeCnvs {
     call RdTestPlot {
       input:
         variants = shard,
-        rd_files = rd_files,
-        rd_file_indexes = rd_file_indexes,
+        rd_files = write_lines(rd_files),
+        rd_file_indicies = write_lines(rd_file_indicies),
         medians = MergeMedians.medians,
         sample_ids = ShardVariants.sample_ids,
         ped_file = ped_file,
@@ -184,8 +184,8 @@ task ShardVariants {
 task RdTestPlot {
   input {
     File variants
-    Array[File] rd_files
-    Array[File] rd_file_indexes
+    File rd_files
+    File rd_file_indicies
     File medians
     File sample_ids
     File ped_file
@@ -197,11 +197,12 @@ task RdTestPlot {
 
   Int variant_count = length(read_lines(variants))
   Int sample_count = length(read_lines(sample_ids))
+  Int batch_count = length(read_lines(rd_files))
 
   RuntimeAttr default_attr = object {
     cpu_cores: 1,
     mem_gb: ceil(0.001 * sample_count),
-    disk_gb: ceil((0.01 * variant_count) + size(variants, "GB") + size(rd_files, "GB")) + 32,
+    disk_gb: ceil((0.01 * variant_count) + size(variants, "GB") + (batch_count * 0.5)) + 16,
     boot_disk_gb: 16,
     preemptible_tries: 3,
     max_retries: 1
@@ -225,15 +226,24 @@ task RdTestPlot {
 
     bedtools merge -i '~{variants}' | cut -f1-3 > merged.bed
 
-    mkdir rd_matrices
-    while read -r rd; do
-      mv "${rd}" "${rd}.tbi" rd_matrices
-    done < '~{write_lines(rd_files)}'
+    mkdir rd_subsets
+    i=0
+    while IFS=$'\t' read -r rd rd_idx; do
+      gcloud storage cp --do-not-decompress --no-clobber "${rd}" "${rd_idx}" .
+      local_rd="$(basename "${rd}")"
+      local_rd_idx="$(basename "${rd_idx}")"
+      subset="rd_subsets/${i}.txt.gz"
+      tabix --print-header --regions merged.bed "${local_rd}" \
+        | bgzip > "${subset}"
+      tabix -p bed "${subset}"
+      rm "${local_rd}" "${local_rd_idx}"
+      i=$(( i + 1 ))
+    done < <(paste '~{rd_files}' '~{rd_file_indicies}')
 
-    Rscript /opt/RdTest/RdTestV2.R \
+    Rscript /opt/RdTest/RdTest.R \
       -b '~{variants}' \
       -n ~{prefix} \
-      -x rd_matrices \
+      -c rd_subsets \
       -m '~{medians}' \
       -f '~{ped_file}' \
       -p TRUE \
