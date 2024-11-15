@@ -294,8 +294,6 @@ task RdTestPlot {
     xargs -I '{}' mv '{}' rd_files < '~{write_lines(rd_files)}'
     xargs -I '{}' mv '{}' rd_files < '~{write_lines(rd_file_indicies)}'
 
-    cut -f 1 '~{sample_table}' > sample_ids.list
-
     mkdir rd_links
     while IFS=$'\t' read -r chr start end vid samples svtype; do
       : > variant.bed
@@ -322,7 +320,6 @@ task RdTestPlot {
         -c rd_links \
         -m merged_medians.bed \
         -p TRUE \
-        -w sample_ids.list \
         ~{flags}
 
       find rd_links -type l -delete
