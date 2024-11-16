@@ -113,6 +113,7 @@ task MergeVCFs {
 
     bcftools concat --file-list '~{write_lines(vcfs)}' \
       --naive --output-type z > '~{prefix}-me_dels.vcf.gz'
+    bcftools index --tbi '~{prefix}-me_dels.vcf.gz'
   >>>
 
   output {
