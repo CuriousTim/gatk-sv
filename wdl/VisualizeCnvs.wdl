@@ -234,7 +234,7 @@ task SubsetRDMatrices {
     tabix --print-header --regions '~{intervals}' '~{rd_file}' \
       | awk '/^#/{print "0\t0\t0\t" $0; next} 1' \
       | LC_ALL=C sort --unique -t$'\t' -k1,1 -k2,2n -k3,3n \
-      | awk 'NR == 1{sub(/^0\t0\t0\t/, ""); print} 1' \
+      | awk 'NR == 1{sub(/^0\t0\t0\t/, "")} 1' \
       | bgzip > '~{rd_file_bn}'
     tabix --preset bed '~{rd_file_bn}'
   >>>
