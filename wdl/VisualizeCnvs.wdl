@@ -140,7 +140,9 @@ task FormatVCFOrBED {
       exit 1
     fi
 
-    bedtools merge -i cnvs.bed | cut -f1-3 > merged_intervals.bed
+    # Merge intervals that are close to prevent duplicates when retrieving with
+    # tabix.
+    bedtools merge -i cnvs.bed -d 101 | cut -f1-3 > merged_intervals.bed
     gzip cnvs.bed
   >>>
 
@@ -205,7 +207,7 @@ task SubsetRDMatrices {
   RuntimeAttr default_attr = object {
     cpu_cores: 1,
     mem_gb: 1,
-    disk_gb: ceil(size(rd_file, "GB") * 2 + size(intervals, "GB")) + 16,
+    disk_gb: ceil(size(rd_file, "GB") + size(rd_file_index, "GB") + size(intervals, "GB")) + 16,
     boot_disk_gb: 16,
     preemptible_tries: 3,
     max_retries: 1
@@ -230,6 +232,9 @@ task SubsetRDMatrices {
     set -o pipefail
 
     tabix --print-header --regions '~{intervals}' '~{rd_file}' \
+      | awk '/^#/{print "0\t0\t0\t" $0; next} 1' \
+      | LC_ALL=C sort --unique -t$'\t' -k1,1 -k2,2n -k3,3n \
+      | awk 'NR == 1{sub(/^0\t0\t0\t/, ""); print} 1' \
       | bgzip > '~{rd_file_bn}'
     tabix --preset bed '~{rd_file_bn}'
   >>>
