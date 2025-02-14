@@ -33,6 +33,7 @@ workflow CleanVcfChromosome {
     String chr_y
 
     File? svtk_to_gatk_script  # For debugging
+    File? make_clean_gq_script
 
     Boolean use_hail
     String? gcs_project
@@ -53,6 +54,7 @@ workflow CleanVcfChromosome {
     RuntimeAttr? runtime_override_stitch_fragmented_cnvs
     RuntimeAttr? runtime_override_final_cleanup
     RuntimeAttr? runtime_override_rescue_me_dels
+    RuntimeAttr? runtime_attr_add_high_fp_rate_filters
 
     # Clean vcf 1b
     RuntimeAttr? runtime_attr_override_subset_large_cnvs_1b
@@ -240,6 +242,7 @@ workflow CleanVcfChromosome {
       prefix="~{prefix}.clean_vcf_5",
       records_per_shard=clean_vcf5_records_per_shard,
       threads_per_task=clean_vcf5_threads_per_task,
+      make_clean_gq_script=make_clean_gq_script,
       sv_pipeline_docker=sv_pipeline_docker,
       sv_base_mini_docker=sv_base_mini_docker,
       runtime_attr_override_scatter=runtime_override_clean_vcf_5_scatter,
@@ -299,9 +302,17 @@ workflow CleanVcfChromosome {
       runtime_attr_override = runtime_override_rescue_me_dels
   }
 
-  call FinalCleanup {
+  call AddHighFDRFilters {
     input:
       vcf=RescueMobileElementDeletions.out,
+      prefix="~{prefix}.high_fdr_filtered",
+      sv_pipeline_docker=sv_pipeline_docker,
+      runtime_attr_override=runtime_attr_add_high_fp_rate_filters
+  }
+
+  call FinalCleanup {
+    input:
+      vcf=AddHighFDRFilters.out,
       contig=contig,
       prefix="~{prefix}.final_cleanup",
       sv_pipeline_docker=sv_pipeline_docker,
@@ -575,18 +586,18 @@ task CleanVcf4 {
       for sid in record.samples:
         s = record.samples[sid]
         # Pick best GT
-        if s['PE_GT'] is None:
+        if s.get('PE_GT') is None:
           continue
-        elif s['SR_GT'] is None:
-          gt = s['PE_GT']
-        elif s['PE_GT'] > 0 and s['SR_GT'] == 0:
-          gt = s['PE_GT']
-        elif s['PE_GT'] == 0:
-          gt = s['SR_GT']
-        elif s['PE_GQ'] >= s['SR_GQ']:
-          gt = s['PE_GT']
+        elif s.get('SR_GT') is None:
+          gt = s.get('PE_GT')
+        elif s.get('PE_GT') > 0 and s.get('SR_GT') == 0:
+          gt = s.get('PE_GT')
+        elif s.get('PE_GT') == 0:
+          gt = s.get('SR_GT')
+        elif s.get('PE_GQ') >= s.get('SR_GQ'):
+          gt = s.get('PE_GT')
         else:
-          gt = s['SR_GT']
+          gt = s.get('SR_GT')
         if gt > 2:
           num_gt_over_2 += 1
       if num_gt_over_2 > max_vf:
@@ -798,6 +809,58 @@ task StitchFragmentedCnvs {
     File stitched_vcf_shard = "~{prefix}.vcf.gz"
   }
 }
+
+# Add FILTER status for pockets of variants with high FP rate: wham-only DELs and Scramble-only SVAs with HIGH_SR_BACKGROUND
+task AddHighFDRFilters {
+  input {
+    File vcf
+    String prefix
+    String sv_pipeline_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float input_size = size(vcf, "GiB")
+  RuntimeAttr runtime_default = object {
+    mem_gb: 3.75,
+    disk_gb: ceil(10.0 + input_size * 3.0),
+    cpu_cores: 1,
+    preemptible_tries: 3,
+    max_retries: 1,
+    boot_disk_gb: 10
+  }
+  RuntimeAttr runtime_override = select_first([runtime_attr_override, runtime_default])
+  runtime {
+    memory: "~{select_first([runtime_override.mem_gb, runtime_default.mem_gb])} GB"
+    disks: "local-disk ~{select_first([runtime_override.disk_gb, runtime_default.disk_gb])} HDD"
+    cpu: select_first([runtime_override.cpu_cores, runtime_default.cpu_cores])
+    preemptible: select_first([runtime_override.preemptible_tries, runtime_default.preemptible_tries])
+    maxRetries: select_first([runtime_override.max_retries, runtime_default.max_retries])
+    docker: sv_pipeline_docker
+    bootDiskSizeGb: select_first([runtime_override.boot_disk_gb, runtime_default.boot_disk_gb])
+  }
+
+  command <<<
+    set -euo pipefail
+
+    python <<CODE
+import pysam
+with pysam.VariantFile("~{vcf}", 'r') as fin:
+  header = fin.header
+  header.add_line("##FILTER=<ID=HIGH_ALGORITHM_FDR,Description=\"Categories of variants with low precision including Wham-only deletions and certain Scramble SVAs\">")
+  with pysam.VariantFile("~{prefix}.vcf.gz", 'w', header=header) as fo:
+    for record in fin:
+        if (record.info['ALGORITHMS'] == ('wham',) and record.info['SVTYPE'] == 'DEL') or \
+          (record.info['ALGORITHMS'] == ('scramble',) and record.info['HIGH_SR_BACKGROUND'] and record.alts == ('<INS:ME:SVA>',)):
+            record.filter.add('HIGH_ALGORITHM_FDR')
+        fo.write(record)
+CODE
+  >>>
+
+  output {
+    File out = "~{prefix}.vcf.gz"
+  }
+}
+
 
 
 # Final VCF cleanup
