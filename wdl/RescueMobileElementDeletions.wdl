@@ -16,21 +16,21 @@ workflow RescueMobileElementDeletions {
     RuntimeAttr? runtime_attr_override
   }
 
-  Array[String] contigs = transpose(read_tsv(contig_list))[0]
+  Array[String] contigs = read_lines(contig_list)
 
-  call SplitVCF {
-    input:
-      vcf = vcf,
-      vcf_index = vcf_index,
-      contigs = contigs,
-      sv_base_mini_docker = sv_base_mini_docker
-  }
+  scatter (co in contigs) {
+    call GetVcfContig {
+      input:
+        vcf = vcf,
+        vcf_index = vcf_index,
+        contig = co,
+        sv_base_mini_docker = sv_base_mini_docker,
+    }
 
-  scatter (i in range(length(SplitVCF.splits))) {
     call CleanVcfChromosome.RescueMobileElementDeletions as rescue_med {
       input:
-        vcf = SplitVCF.splits[i],
-        prefix = i,
+        vcf = GetVcfContig.vcf_contig,
+        prefix = co,
         LINE1 = LINE1_reference,
         HERVK = HERVK_reference,
         sv_pipeline_docker = sv_pipeline_docker,
@@ -51,15 +51,15 @@ workflow RescueMobileElementDeletions {
   }
 }
 
-task SplitVCF {
+task GetVcfContig {
   input {
     File vcf
     File vcf_index
-    Array[String] contigs
+    String contig
     String sv_base_mini_docker
   }
 
-  Int disk_size_gb = ceil(size(vcf, "GB") * 2.5) + 16
+  Int disk_size_gb = ceil(size(vcf, "GB") * 2.5 + size(vcf, "GB")) + 16
 
   runtime {
     memory: "1GiB"
@@ -76,14 +76,12 @@ task SplitVCF {
     set -o nounset
     set -o pipefail
 
-    mkdir splits
-    while read -r co; do
-      bcftools view --regions "${co}" --output-type z '~{vcf}' > "splits/${co}.vcf.gz"
-    done < '~{write_lines(contigs)}'
+    bcftools view --regions '~{contig}' --output-type z '~{vcf}' \
+      --output '~{contig}.vcf.gz'
   >>>
 
   output {
-    Array[File] splits = glob("splits/*.vcf.gz")
+    File vcf_contig = "${contig}.vcf.gz"
   }
 }
 
