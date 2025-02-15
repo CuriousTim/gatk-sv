@@ -9,6 +9,7 @@ workflow RescueMobileElementDeletions {
     File vcf_index
     File contig_list
     String prefix
+    Boolean? has_end2
     File LINE1_reference
     File HERVK_reference
     String sv_pipeline_docker
@@ -31,6 +32,7 @@ workflow RescueMobileElementDeletions {
       input:
         vcf = GetVcfContig.vcf_contig,
         prefix = co,
+        has_end2 = has_end2,
         LINE1 = LINE1_reference,
         HERVK = HERVK_reference,
         sv_pipeline_docker = sv_pipeline_docker,
