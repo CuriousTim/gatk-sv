@@ -79,18 +79,20 @@ task GetVcfContig {
     set -o nounset
     set -o pipefail
 
-    if [[ ~{true="true" false="false" add_end2} == 'true' ]] then
-      bcftools view --regions '~{contig}' --output-type v \
+    if [[ ~{true="true" false="false" add_end2} == 'true' ]]; then
+      bcftools view --regions '~{contig}' --output-type v '~{vcf} \
         | awk -F'\t' '$0 ~ /^##/ {print; if ($0 ~ /##INFO=<ID=END2/) { a = 1 } next}
             $0 ~ /^#CHROM/ {if (!a) { print "##INFO=<ID=END2,Number=1,Type=Integer,Description=\"Position of breakpoint on CHR2\">" } print; next}
             $8 ~ /SVTYPE=BND/ && $8 ~ /STRANDS=\+-/ {
+              chr2 = ""
+              svlen = 0
               match($8, /CHR2=[^;]+/)
               if (RSTART) {
-                chr2 = substr($8, RSTART + 5, RLENGTH)
+                chr2 = substr($8, RSTART + 5, RLENGTH - 5)
               }
               match($8, /SVLEN=[^;]+/)
               if (RSTART) {
-                svlen = substr($8, RSTART + 6, RLENGTH)
+                svlen = substr($8, RSTART + 6, RLENGTH - 6)
               }
 
               if ($1 == chr2 && svlen) {
@@ -100,8 +102,7 @@ task GetVcfContig {
           } 1' OFS='\t' - \
         | bgzip -c > '~{contig}.vcf.gz'
     else
-      bcftools view --regions '~{contig}' --output-type z '~{vcf}' \
-        --output '~{contig}.vcf.gz'
+      bcftools view --regions '~{contig}' --output-type z --output '~{contig}.vcf.gz' '~{vcf}'
     fi
   >>>
 
