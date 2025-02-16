@@ -80,7 +80,7 @@ task GetVcfContig {
     set -o pipefail
 
     if [[ ~{true="true" false="false" add_end2} == 'true' ]]; then
-      bcftools view --regions '~{contig}' --output-type v '~{vcf} \
+      bcftools view --regions '~{contig}' --output-type v '~{vcf}' \
         | awk -F'\t' '$0 ~ /^##/ {print; if ($0 ~ /##INFO=<ID=END2/) { a = 1 } next}
             $0 ~ /^#CHROM/ {if (!a) { print "##INFO=<ID=END2,Number=1,Type=Integer,Description=\"Position of breakpoint on CHR2\">" } print; next}
             $8 ~ /SVTYPE=BND/ && $8 ~ /STRANDS=\+-/ {
