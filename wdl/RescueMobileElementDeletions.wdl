@@ -9,7 +9,7 @@ workflow RescueMobileElementDeletions {
     File vcf_index
     File contig_list
     String prefix
-    Boolean? has_end2
+    Boolean? add_end2
     File LINE1_reference
     File HERVK_reference
     String sv_pipeline_docker
@@ -24,6 +24,7 @@ workflow RescueMobileElementDeletions {
       input:
         vcf = vcf,
         vcf_index = vcf_index,
+        add_end2 = add_end2,
         contig = co,
         sv_base_mini_docker = sv_base_mini_docker,
     }
@@ -32,7 +33,6 @@ workflow RescueMobileElementDeletions {
       input:
         vcf = GetVcfContig.vcf_contig,
         prefix = co,
-        has_end2 = has_end2,
         LINE1 = LINE1_reference,
         HERVK = HERVK_reference,
         sv_pipeline_docker = sv_pipeline_docker,
@@ -57,6 +57,7 @@ task GetVcfContig {
   input {
     File vcf
     File vcf_index
+    Boolean add_end2 = false
     String contig
     String sv_base_mini_docker
   }
@@ -78,8 +79,30 @@ task GetVcfContig {
     set -o nounset
     set -o pipefail
 
-    bcftools view --regions '~{contig}' --output-type z '~{vcf}' \
-      --output '~{contig}.vcf.gz'
+    if [[ ~{true="true" false="false" add_end2} == 'true' ]] then
+      bcftools view --regions '~{contig}' --output-type v \
+        | awk -F'\t' '$0 ~ /^##/ {print; if ($0 ~ /##INFO=<ID=END2/) { a = 1 } next}
+            $0 ~ /^#CHROM/ {if (!a) { print "##INFO=<ID=END2,Number=1,Type=Integer,Description=\"Position of breakpoint on CHR2\">" } print; next}
+            $8 ~ /SVTYPE=BND/ && $8 ~ /STRANDS=\+-/ {
+              match($8, /CHR2=[^;]+/)
+              if (RSTART) {
+                chr2 = substr($8, RSTART + 5, RLENGTH)
+              }
+              match($8, /SVLEN=[^;]+/)
+              if (RSTART) {
+                svlen = substr($8, RSTART + 6, RLENGTH)
+              }
+
+              if ($1 == chr2 && svlen) {
+                sub(/END2=[^;]+;?/, "", $8)
+                $8 = $8 ";END2=" ($2 + svlen)
+              }
+          } 1' OFS='\t' - \
+        | bgzip -c > '~{contig}.vcf.gz'
+    else
+      bcftools view --regions '~{contig}' --output-type z '~{vcf}' \
+        --output '~{contig}.vcf.gz'
+    fi
   >>>
 
   output {

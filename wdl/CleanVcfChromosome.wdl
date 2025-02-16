@@ -626,7 +626,6 @@ task RescueMobileElementDeletions {
     String prefix
     File LINE1
     File HERVK
-    Boolean has_end2 = true
     String sv_pipeline_docker
     RuntimeAttr? runtime_attr_override
   }
@@ -660,15 +659,9 @@ import pysam
 fin=pysam.VariantFile("~{vcf}")
 fo=pysam.VariantFile("~{prefix}.bnd_del.vcf.gz", 'w', header = fin.header)
 for record in fin:
-    if record.info['SVTYPE'] in ['BND'] and record.info['STRANDS']=="+-" and record.chrom == record.info['CHR2']:
-        if ~{true="True" false="False" has_end2}:
-            if record.info['END2'] - record.start < 10000:
-                record.info['SVLEN'] = record.info['END2'] - record.start
-                fo.write(record)
-        else:
-            if record.info['SVLEN'] < 10000:
-                record.info['END2'] = record.start + record.info['SVLEN']
-                fo.write(record)
+    if record.info['SVTYPE'] in ['BND'] and record.info['STRANDS']=="+-" and record.chrom == record.info['CHR2'] and record.info['END2'] - record.start < 10000:
+        record.info['SVLEN'] = record.info['END2'] - record.start
+        fo.write(record)
 fin.close()
 fo.close()
 CODE
