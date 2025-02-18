@@ -7,7 +7,7 @@ workflow NullContigGenotypes {
     File vcf
     File vcf_index
     File samples_list
-    Array[String] contigs = ["chrX", "chrY"]
+    Array[String]? contigs
 
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override_regenotype
@@ -18,6 +18,7 @@ workflow NullContigGenotypes {
       vcf = vcf,
       vcf_index = vcf_index,
       samples_list = samples_list,
+      contigs = contigs,
       runtime_docker = sv_base_mini_docker,
       runtime_attr_override = runtime_attr_override_regenotype
   }
@@ -33,7 +34,7 @@ task SetGenotypesToNull {
     File vcf
     File vcf_index
     File samples_list
-    Array[String] contigs
+    Array[String] contigs = ["chrX", "chrY"]
     String runtime_docker 
     RuntimeAttr? runtime_attr_override
   }
