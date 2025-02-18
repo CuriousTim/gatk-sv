@@ -66,14 +66,13 @@ task SetGenotypesToNull {
     set -o nounset
     set -o pipefail
 
-    contigs_list='~{write_lines(contigs)}'
-    bcftools query --regions-file "${contigs_list}" \
+    bcftools query --regions '~{sep="," contigs}' \
       --format '%CHROM\t%POS\n' '~{vcf}' \
       | awk -F'\t' '{print $0 "\t./."}' \
       | bgzip -c > 'annotations.tsv.gz'
     tabix --begin 2 --end 2 --sequence 1 'annotations.tsv.gz'
     bcftools annotate --annotations 'annotations.tsv.gz' \
-      --columns 'CHROM,POS,.FORMAT/GT' --regions-file "${contigs_list}" \
+      --columns 'CHROM,POS,.FORMAT/GT' --regions '~{sep="," contigs}' \
       --output 'genotypes_nulled.vcf.gz' --output-type z \
       --samples-file '~{samples_list}'
     tabix --preset vcf 'genotypes_nulled.vcf.gz'
