@@ -74,7 +74,7 @@ task SetGenotypesToNull {
     bcftools annotate --annotations 'annotations.tsv.gz' \
       --columns 'CHROM,POS,.FORMAT/GT' --regions '~{sep="," contigs}' \
       --output 'genotypes_nulled.vcf.gz' --output-type z \
-      --samples-file '~{samples_list}'
+      --samples-file '~{samples_list}' '~{vcf}'
     tabix --preset vcf 'genotypes_nulled.vcf.gz'
   >>>
 
