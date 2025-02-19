@@ -130,13 +130,13 @@ task SetGenotypesToNull {
         printf "\t./."
       }
       printf "\n"
-    }' "${samples_list}" 'positions.tsv' >> 'annotations.vcf'
+    }' "${filtered_samples}" 'positions.tsv' >> 'annotations.vcf'
     bgzip 'annotations.vcf'
     bcftools index 'annotations.vcf.gz'
 
     bcftools annotate --annotations 'annotations.vcf.gz' \
       --columns 'CHROM,POS,.FORMAT/GT' --output 'genotypes_nulled.vcf.gz' \
-      --output-type z --samples-file "${samples_list}" '~{vcf}' \
+      --output-type z --samples-file "${filtered_samples}" '~{vcf}' \
       --pair-logic all
     bcftools index 'genotypes_nulled.vcf.gz'
   >>>
