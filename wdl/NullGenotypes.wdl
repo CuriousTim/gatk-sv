@@ -103,12 +103,15 @@ task SetGenotypesToNull {
     }' "${contigs_list}" >> 'annotations.vcf'
     printf '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n' >> 'annotations.vcf'
 
-    samples_list='~{samples_list}'
+    filtered_samples='samples_to_annotate.list'
+    bcftools query --list-samples '~{vcf}' | LC_ALL=C sort > 'samples_in_vcf.list'
+    LC_ALL=C sort -u '~{samples_list}' > 'requested_samples.list'
+    LC_ALL=C comm -12 'samples_in_vcf.list' 'requested_samples.list' > "${filtered_samples}"
     awk '
     {a[$1]}
     END{
       if (NR == 0) {
-        print "at least one sample must be given" > "/dev/stderr"
+        print "no samples in the input list were found in the VCF" > "/dev/stderr"
         exit 88
       }
 
@@ -117,7 +120,7 @@ task SetGenotypesToNull {
         printf "\t%s", s
       }
       printf "\n"
-    }' "${samples_list}" >> 'annotations.vcf'
+    }' "${filtered_samples}" >> 'annotations.vcf'
 
     awk -F '\t' '
     NR == FNR { ++count }
