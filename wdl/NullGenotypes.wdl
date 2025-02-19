@@ -66,20 +66,80 @@ task SetGenotypesToNull {
     set -o nounset
     set -o pipefail
 
-    bcftools query --regions '~{sep="," contigs}' \
-      --format '%CHROM\t%POS\n' '~{vcf}' \
-      | awk -F'\t' '{print $0 "\t./."}' \
-      | bgzip -c > 'annotations.tsv.gz'
-    tabix --begin 2 --end 2 --sequence 1 'annotations.tsv.gz'
-    bcftools annotate --annotations 'annotations.tsv.gz' \
-      --columns 'CHROM,POS,.FORMAT/GT' --regions '~{sep="," contigs}' \
-      --output 'genotypes_nulled.vcf.gz' --output-type z \
-      --samples-file '~{samples_list}' '~{vcf}'
-    tabix --preset vcf 'genotypes_nulled.vcf.gz'
+    if [[ '~{vcf_index}' =~ .*\.tbi$ ]]; then
+      vcf_index_ext='tbi'
+    elif [[ '~{vcf_index}' =~ .*\.csi$ ]]; then
+      vcf_index_ext='csi'
+    else
+      vcf_index_ext='index'
+    fi
+
+    bcftools query --regions '~{sep="," contigs}' --format '%CHROM\t%POS\n' '~{vcf}' > 'positions.tsv'
+    if awk 'END{exit NR > 0}' 'positions.tsv'; then
+      printf 'no positions found in the VCF for the given contigs\n' >&2
+      printf 'no genotypes will be changed\n' >&2
+      cp '~{vcf}' 'genotypes_nulled.vcf.gz'
+      cp '~{vcf_index}' "genotypes_nulled.vcf.gz.${vcf_index_ext}"
+      exit 0
+    fi
+
+    contigs_list='~{write_lines(contigs)}'
+    printf '##fileformat=VCFv4.5\n' > 'annotations.vcf'
+    awk '
+    $1 !~ /^[0-9A-Za-z!#$%&+.\/:;?@\^_|~-][0-9A-Za-z!#$%&*+.\/:;=?@\^_|~-]*$/ {
+      print $1 " does not conform to VCF spec for contig IDs" > "/dev/stderr"
+      had_err = 1
+      exit 87
+    }
+    {
+      print "##contig=<ID=" $1 ">"
+      ++contig_count
+    }
+    END {
+      if (contig_count == 0) {
+        print "at least one contig must given" > "/dev/stderr"
+        exit 88
+      }
+    }' "${contigs_list}" >> 'annotations.vcf'
+    printf '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n' >> 'annotations.vcf'
+
+    samples_list='~{samples_list}'
+    awk '
+    {a[$1]}
+    END{
+      if (NR == 0) {
+        print "at least one sample must be given" > "/dev/stderr"
+        exit 88
+      }
+
+      printf "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT"
+      for (s in a) {
+        printf "\t%s", s
+      }
+      printf "\n"
+    }' "${samples_list}" >> 'annotations.vcf'
+
+    awk -F '\t' '
+    NR == FNR { ++count }
+    NR > FNR {
+      printf "%s\t%d\t.\tA\t.\t.\t.\t.\tGT", $1, $2
+      for (i = 1; i <= count; ++i) {
+        printf "\t./."
+      }
+      printf "\n"
+    }' "${samples_list}" 'positions.tsv' >> 'annotations.vcf'
+    bgzip 'annotations.vcf'
+    bcftools index 'annotations.vcf.gz'
+
+    bcftools annotate --annotations 'annotations.vcf.gz' \
+      --columns 'CHROM,POS,.FORMAT/GT' --output 'genotypes_nulled.vcf.gz' \
+      --output-type z --samples-file "${samples_list}" '~{vcf}' \
+      --pair-logic all
+    bcftools index 'genotypes_nulled.vcf.gz'
   >>>
 
   output {
     File output_vcf = "genotypes_nulled.vcf.gz"
-    File output_vcf_index = "genotypes_nulled.vcf.gz.tbi"
+    File output_vcf_index = "genotypes_nulled.vcf.gz.csi"
   }
 }
