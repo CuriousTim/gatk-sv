@@ -58,7 +58,7 @@ workflow RefineComplexVariants {
             batch_sample_lists = batch_sample_lists,
             batch_pe_files = write_lines(PE_metrics),
             prefix = prefix,
-            sv_pipeline_docker = sv_pipeline_docker,
+            sv_pipeline_docker = "us.gcr.io/broad-dsde-methods/gatk-sv/sv-pipeline:2025-02-10-v1.0.2-72c15c6b",
             runtime_attr_override = runtime_attr_sample_batch
     }
 
@@ -67,7 +67,7 @@ workflow RefineComplexVariants {
           vcf = vcf,
           prefix = prefix,
           records_per_shard = n_per_split,
-          sv_pipeline_docker = sv_pipeline_docker,
+          sv_pipeline_docker = "us.gcr.io/broad-dsde-methods/gatk-sv/sv-pipeline:2025-02-10-v1.0.2-72c15c6b",
           runtime_attr_override = runtime_attr_scatter_vcf
       }
 
@@ -77,7 +77,7 @@ workflow RefineComplexVariants {
             input:
                 vcf_file = ScatterVcf.shards[i],
                 args = "-i ALL --include-filters",
-                variant_interpretation_docker = sv_pipeline_docker,
+                variant_interpretation_docker = "us.gcr.io/broad-dsde-methods/gatk-sv/sv-pipeline:2025-02-10-v1.0.2-72c15c6b",
                 runtime_attr_override = runtime_attr_vcf2bed
         }
 
@@ -99,7 +99,7 @@ workflow RefineComplexVariants {
                 Depth_DUP_beds = Depth_DUP_beds,
 
                 sv_base_mini_docker = sv_base_mini_docker,
-                sv_pipeline_docker = sv_pipeline_docker,
+                sv_pipeline_docker = "us.gcr.io/broad-dsde-methods/gatk-sv/sv-pipeline:2025-02-10-v1.0.2-72c15c6b",
 
                 runtime_attr_concat_bed_Step1 = runtime_attr_concat_bed_Step1,
                 runtime_attr_concat_bed_Step2 = runtime_attr_concat_bed_Step2,
@@ -124,7 +124,7 @@ workflow RefineComplexVariants {
                 PE_collect_script = GenerateCpxReviewScript.pe_evidence_collection_script,
                 prefix = "~{prefix}.~{i}",
                 n_per_split = n_per_split,
-                sv_pipeline_docker = sv_pipeline_docker,
+                sv_pipeline_docker = "us.gcr.io/broad-dsde-methods/gatk-sv/sv-pipeline:2025-02-10-v1.0.2-72c15c6b",
                 sv_base_mini_docker = sv_base_mini_docker,
                 runtime_attr_collect_pe = runtime_attr_collect_pe,
                 runtime_attr_split_script = runtime_attr_split_script,
@@ -139,7 +139,7 @@ workflow RefineComplexVariants {
                 depth_supp = CollectLargeCNVSupportForCPX.lg_cnv_depth_supp,
                 min_pe_cpx = min_pe_cpx,
                 prefix = "~{prefix}.~{i}",
-                sv_pipeline_docker = sv_pipeline_docker,
+                sv_pipeline_docker = "us.gcr.io/broad-dsde-methods/gatk-sv/sv-pipeline:2025-02-10-v1.0.2-72c15c6b",
                 runtime_attr_override = runtime_attr_calcu_cpx_evidences
         }
 
@@ -149,7 +149,7 @@ workflow RefineComplexVariants {
                 PE_supp = CollectPEMetricsForCPX.evi_stat,
                 min_pe_ctx = min_pe_ctx,
                 prefix = "~{prefix}.~{i}",
-                sv_pipeline_docker = sv_pipeline_docker,
+                sv_pipeline_docker = "us.gcr.io/broad-dsde-methods/gatk-sv/sv-pipeline:2025-02-10-v1.0.2-72c15c6b",
                 runtime_attr_override = runtime_attr_calcu_cpx_evidences
         }
 
@@ -160,7 +160,7 @@ workflow RefineComplexVariants {
                 CTX_manual = CalculateCtxEvidences.manual_revise_CTX_results,
                 unresolved_svids = GenerateCpxReviewScript.unresolved_svids,
                 prefix = "~{prefix}.~{i}",
-                sv_pipeline_docker = sv_pipeline_docker
+                sv_pipeline_docker = "us.gcr.io/broad-dsde-methods/gatk-sv/sv-pipeline:2025-02-10-v1.0.2-72c15c6b"
         }
     }
 
@@ -171,7 +171,7 @@ workflow RefineComplexVariants {
                 prefix="~{prefix}.cpx_refined",
                 gcs_project=gcs_project,
                 sv_base_mini_docker=sv_base_mini_docker,
-                sv_pipeline_docker=sv_pipeline_docker,
+                sv_pipeline_docker= "us.gcr.io/broad-dsde-methods/gatk-sv/sv-pipeline:2025-02-10-v1.0.2-72c15c6b",
                 runtime_override_preconcat=runtime_attr_preconcat,
                 runtime_override_hail_merge=runtime_attr_hail_merge,
                 runtime_override_fix_header=runtime_attr_fix_header
