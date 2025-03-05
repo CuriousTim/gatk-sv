@@ -49,6 +49,7 @@ workflow FilterGenotypesSharded {
   scatter (vcf in vcfs) {
     call filter.FilterGenotypes {
       input:
+        primary_contigs_fai = primary_contigs_fai,
         vcf = vcf,
         output_prefix = output_prefix,
         ploidy_table = ploidy_table,
