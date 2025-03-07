@@ -497,8 +497,8 @@ def main():
     delta = end - start
     print("Took %f seconds to process" % delta)
 
-    # Remove WHAM only and GT = 1
-    verbose_print('Remove wham only and GT=1 calls', verbose)
+    # Remove WHAM only and GQ = 1
+    verbose_print('Remove wham only and GQ=1 calls', verbose)
     start = time.time()
     remove_wham = bed_child[(bed_child['ALGORITHMS'] == "wham") & (bed_child['GQ'] == '1')]
     bed_child.loc[bed_child['name_famid'].isin(remove_wham) & bed_child['is_de_novo'], 'filter_flag'] = 'wham_only'
