@@ -278,7 +278,6 @@ def main():
     parser.add_argument('--bed', dest='bed', help='Input BED file')
     parser.add_argument('--ped', dest='ped', help='Ped file')
     parser.add_argument('--vcf', dest='vcf', help='VCF file')
-    parser.add_argument('--disorder', dest='disorder', help='Genomic disorder regions')
     parser.add_argument('--out', dest='out', help='Output file with all variants')
     parser.add_argument('--out_de_novo', dest='out_de_novo', help='Output file with only de novo variants')
     parser.add_argument('--raw_proband', dest='raw_proband', help='Directory with raw SV calls - output from m04')
@@ -295,7 +294,6 @@ def main():
     bed_file = args.bed
     ped_file = args.ped
     vcf_file = args.vcf
-    disorder_file = args.disorder
     out_file = args.out
     de_novo_out_file = args.out_de_novo
     raw_file_proband = args.raw_proband
@@ -331,7 +329,6 @@ def main():
     bed.rename(columns={'#chrom': 'chrom'}, inplace=True)
     vcf = pd.read_csv(vcf_file, sep='\t')
     ped = pd.read_csv(ped_file, sep='\t')
-    disorder = pd.read_csv(disorder_file, sep='\t', header=None)
     raw_bed_colnames = ['ID', 'start', 'end', 'svtype', 'sample']
     raw_bed_child = pd.read_csv(raw_file_proband, sep='\t', names=raw_bed_colnames, header=None).replace(np.nan, '', regex=True)
     raw_bed_parent = pd.read_csv(raw_file_parent, sep='\t', names=raw_bed_colnames, header=None).replace(np.nan, '', regex=True)
@@ -412,37 +409,27 @@ def main():
     delta = end - start
     print("Took %f seconds to process" % delta)
 
-    # Flag variants in genomic disorder (GD) regions
-    verbose_print('Flagging variants in GD', verbose)
-    start = time.time()
-    bed_child['in_gd'] = bed_child['name'].isin(disorder[0])
-    end = time.time()
-    delta = end - start
-    print("Took %f seconds to process" % delta)
-
     # Annotate family information for filtering
     bed_child['family_id'] = bed_child.apply(lambda r: get_family_id(r, ped), axis=1)
     bed_child['name_famid'] = bed_child['name'] + "_" + bed_child['family_id'].astype(str).str.strip("[]")
     bed_parents['family_id'] = bed_parents.apply(lambda r: get_family_id(r, ped), axis=1)
     bed_parents['name_famid'] = bed_parents['name'] + "_" + bed_parents['family_id'].astype(str).str.strip("[]")
 
-    # Filter out by frequency - AF gnomad < 0.01 OR inGD
+    # Filter out by frequency - AF gnomad < 0.01
     verbose_print('Filtering by frequency', verbose)
     start = time.time()
     bed_child["AF"] = pd.to_numeric(bed_child["AF"])
     try:
         bed_child[gnomad_col] = pd.to_numeric(bed_child[gnomad_col])
         remove_freq = bed_child[~((((bed_child[gnomad_col] <= gnomad_af) & (bed_child['AF'] <= cohort_af)) |
-                                   ((bed_child[gnomad_col].isnull()) & (bed_child['AF'] <= cohort_af)) |
-                                   (bed_child['in_gd'])))]['name_famid'].to_list()
+                                   ((bed_child[gnomad_col].isnull()) & (bed_child['AF'] <= cohort_af))))]['name_famid'].to_list()
         bed_child['is_de_novo'] = pd.Series(True, index=bed_child.index).mask(bed_child['name_famid'].isin(remove_freq), False)
         bed_child['filter_flag'] = pd.Series('de_novo', index=bed_child.index).mask(bed_child['name_famid'].isin(remove_freq), 'AF')
 
     except KeyError:
         bed_child[alt_gnomad_col] = pd.to_numeric(bed_child[alt_gnomad_col])
         remove_freq = bed_child[~((((bed_child[alt_gnomad_col] <= gnomad_af) & (bed_child['AF'] <= cohort_af)) |
-                                   ((bed_child[alt_gnomad_col].isnull()) & (bed_child['AF'] <= cohort_af)) |
-                                   (bed_child['in_gd'])))]['name_famid'].to_list()
+                                   ((bed_child[alt_gnomad_col].isnull()) & (bed_child['AF'] <= cohort_af))))]['name_famid'].to_list()
         bed_child['is_de_novo'] = pd.Series(True, index=bed_child.index).mask(bed_child['name_famid'].isin(remove_freq), False)
         bed_child['filter_flag'] = pd.Series('de_novo', index=bed_child.index).mask(bed_child['name_famid'].isin(remove_freq), 'AF')
     end = time.time()
@@ -822,7 +809,7 @@ def main():
 
     # Define output files
     output = bed_final
-    de_novo = bed_final[(bed_final['is_de_novo']) | (bed_final['filter_flag'] == 'ins_filter') | (bed_final['in_gd'])]
+    de_novo = bed_final[(bed_final['is_de_novo']) | (bed_final['filter_flag'] == 'ins_filter')]
 
     # Write output
     output.to_csv(path_or_buf=out_file, mode='a', index=False, sep='\t', header=True)
