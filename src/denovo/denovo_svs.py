@@ -381,13 +381,13 @@ def main():
     delta = end - start
     print("Took %f seconds to process" % delta)
 
-    # Flag if small or large CNV based on large_cnv_size cutoff and flag for removal based on size for depth only calls
+    # Flag if small or large CNV based on large_cnv_size cutoff and flag for removal based on size for depth-only calls
     verbose_print('Flagging calls depending on size', verbose)
     start = time.time()
     bed['is_large_cnv'] = (bed['SVLEN'] >= large_cnv_size) & ((bed['svtype'] == 'DEL') | (bed['svtype'] == 'DUP'))
     bed['is_small_cnv'] = (bed['SVLEN'] < large_cnv_size) & ((bed['svtype'] == 'DEL') | (bed['svtype'] == 'DUP'))
     bed['is_depth_only'] = (bed['EVIDENCE'] == "RD")
-    bed['is_depth_only_small'] = (bed['svtype'] == "DUP") & (bed['ALGORITHMS'] == "depth") & (bed['SVLEN'] <= depth_only_size)
+    bed['is_depth_only_small_dup'] = (bed['svtype'] == "DUP") & (bed['ALGORITHMS'] == "depth") & (bed['SVLEN'] <= depth_only_size)
     end = time.time()
     delta = end - start
     print("Took %f seconds to process" % delta)
@@ -484,8 +484,8 @@ def main():
     delta = end - start
     print("Took %f seconds to process" % delta)
 
-    # Remove WHAM only and GQ = 1
-    verbose_print('Remove wham only and GQ=1 calls', verbose)
+    # Remove WHAM-only SVs with low-quality genotype (GQ = 1)
+    verbose_print('Remove Wham-only SVs with low-quality genotype (GQ = 1)', verbose)
     start = time.time()
     remove_wham = bed_child[(bed_child['ALGORITHMS'] == "wham") & (bed_child['GQ'] == '1')]
     bed_child.loc[bed_child['name_famid'].isin(remove_wham) & bed_child['is_de_novo'], 'filter_flag'] = 'wham_only'
@@ -728,14 +728,14 @@ def main():
     # Filter out calls that are depth only and < depth_only_size
     verbose_print('Filtering out calls that are depth only and < depth_only_size', verbose)
     start = time.time()
-    remove_depth_small = bed_child[(bed_child['is_depth_only_small'])]['name_famid'].to_list()
+    remove_depth_small = bed_child[(bed_child['is_depth_only_small_dup'])]['name_famid'].to_list()
     bed_child.loc[bed_child['name_famid'].isin(remove_depth_small) & bed_child['is_de_novo'], 'filter_flag'] = 'depth_only_small_variant'
     bed_child.loc[bed_child['name_famid'].isin(remove_depth_small) & bed_child['is_de_novo'], 'is_de_novo'] = False
     end = time.time()
     delta = end - start
     print("Took %f seconds to process" % delta)
 
-    # Filter out DELs that are >500bp and RD_CN=2 and PE only envidence
+    # Filter out DELs with RD_CN > 1 and PE only envidence
     verbose_print('Filtering out DELs that are RD_CN=2 and PE only evidence', verbose)
     start = time.time()
     remove_dels = bed_child[(bed_child['SVTYPE'] == 'DEL') & ((bed_child['RD_CN'] == '2') | (bed_child['RD_CN'] == '3')) & (bed_child['EVIDENCE'] == 'PE')]['name_famid'].to_list()
