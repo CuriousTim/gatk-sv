@@ -6,9 +6,9 @@ import "TasksMakeCohortVcf.wdl" as miniTasks
 import "DeNovoSVsScatter.wdl" as runDeNovo
 import "Utils.wdl" as util
 
-workflow deNovoSV {
+workflow DeNovoSV {
   input {
-    File ped_file
+    File pedigree
     File vcf_file
     File? vcf_index
     Array[String] contigs = ["chr1", "chr2", "chr3", "chr4", "chr5",
@@ -31,7 +31,7 @@ workflow deNovoSV {
     Int records_per_shard
     String output_prefix
     # One family ID per line to call de novo
-    File? family_ids_txt
+    File? family_ids
     String variant_interpretation_docker
     String sv_pipeline_updates_docker
     String sv_base_mini_docker
@@ -53,9 +53,9 @@ workflow deNovoSV {
     Float? gq_min
     String? af_column_name
 
-    RuntimeAttr? runtime_attr_make_manifests
-    RuntimeAttr? runtime_attr_get_batched_files
-    RuntimeAttr? runtime_attr_subset_by_samples
+    RuntimeAttr? runtime_override_make_manifests
+    RuntimeAttr? runtime_override_subset_manifests
+    RuntimeAttr? runtime_override_subset_vcf
     RuntimeAttr? runtime_attr_clean_ped
     RuntimeAttr? runtime_attr_raw_vcf_to_bed
     RuntimeAttr? runtime_attr_raw_merge_bed
@@ -87,40 +87,40 @@ workflow deNovoSV {
       clustered_scramble_vcf = clustered_scramble_vcf,
       clustered_depth_vcf = clustered_depth_vcf,
       runtime_docker = linux_docker,
-      runtime_attr_override = runtime_attr_make_manifests
+      runtime_attr_override = runtime_override_make_manifests
   }
 
   # If this file is given, subset all other input files to only include the necessary batches.
-  if (defined(family_ids_txt)) {
-    call GetBatchedFiles {
+  if (defined(family_ids)) {
+    call SubsetManifestsByFamilies {
       input:
-        batch_raw_file = MakeManifests.pesr_manifest,
-        batch_depth_raw_file = MakeManifests.depth_manifest,
-        ped_file = ped_file,
-        family_ids_txt = select_first([family_ids_txt]),
-        sample_batches = MakeManifests.sample_manifest,
-        batch_bincov_index = MakeManifests.bincov_manifest,
-        python_docker = python_docker,
-        runtime_attr_override = runtime_attr_get_batched_files
+        pesr_manifest = MakeManifests.pesr_manifest,
+        depth_manifest = MakeManifests.depth_manifest,
+        sample_manifest = MakeManifests.sample_manifest,
+        bincov_manifest = MakeManifests.bincov_manifest,
+        family_ids = select_first([family_ids]),
+        pedigree = pedigree,
+        linux_docker = linux_docker,
+        runtime_attr_override = runtime_override_subset_manifests
     }
 
     call util.SubsetVcfBySamplesList {
       input:
         vcf = vcf_file,
         vcf_idx = vcf_index,
-        list_of_samples = GetBatchedFiles.samples,
+        list_of_samples = SubsetManifestsByFamilies.subset_samples,
         outfile_name = output_prefix,
         keep_af = true,
         remove_private_sites = false,
         sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_attr_subset_by_samples
+        runtime_attr_override = runtime_override_subset_vcf
     }
   }
 
   # Makes a ped file of singletons, duos, and trios for input into the de novo script (only including families of interest)
   call CleanPed {
     input:
-      ped_file = ped_file,
+      ped_file = pedigree,
       vcf_input = select_first([SubsetVcfBySamplesList.vcf_subset, vcf_file]),
       variant_interpretation_docker=variant_interpretation_docker,
       runtime_attr_override = runtime_attr_clean_ped
@@ -130,7 +130,7 @@ workflow deNovoSV {
   call raw.ReformatRawFiles as ReformatRawFiles {
     input:
       contigs = contigs,
-      raw_files_list = select_first([GetBatchedFiles.batch_raw_files_list, MakeManifests.pesr_manifest]),
+      raw_files_list = select_first([SubsetManifestsByFamilies.subset_pesr_manifest, MakeManifests.pesr_manifest]),
       ped_input = CleanPed.cleaned_ped,
       depth = false,
       variant_interpretation_docker = variant_interpretation_docker,
@@ -145,7 +145,7 @@ workflow deNovoSV {
   call raw.ReformatRawFiles as ReformatDepthRawFiles {
     input:
       contigs = contigs,
-      raw_files_list = select_first([GetBatchedFiles.batch_depth_raw_files_list, MakeManifests.depth_manifest]),
+      raw_files_list = select_first([SubsetManifestsByFamilies.subset_depth_manifest, MakeManifests.depth_manifest]),
       ped_input = CleanPed.cleaned_ped,
       depth = true,
       variant_interpretation_docker = variant_interpretation_docker,
@@ -202,7 +202,7 @@ workflow deNovoSV {
         raw_depth_parents = ReformatDepthRawFiles.reformatted_parents_raw_files[i],
         exclude_regions = exclude_regions,
         sample_batches = MakeManifests.sample_manifest,
-        batch_bincov_index = select_first([GetBatchedFiles.batch_bincov_index_subset, MakeManifests.bincov_manifest]),
+        batch_bincov_index = select_first([SubsetManifestsByFamilies.subset_bincov_manifest, MakeManifests.bincov_manifest]),
         large_cnv_size = large_cnv_size,
         gnomad_col = gnomad_col,
         alt_gnomad_col = alt_gnomad_col,
@@ -243,7 +243,7 @@ workflow deNovoSV {
   call CreatePlots {
     input:
       bed_file = CallOutliers.final_denovo_nonOutliers_output,
-      ped_file = ped_file,
+      ped_file = pedigree,
       variant_interpretation_docker=variant_interpretation_docker,
       runtime_attr_override = runtime_attr_create_plots
   }
@@ -362,6 +362,76 @@ task MakeManifests {
     File pesr_manifest = "pesr_manifest.tsv"
     File bincov_manifest = "bincov_manifest.tsv"
     File sample_manifest = "sample_manifest.tsv"
+  }
+}
+
+# Subset the PESR, depth, sample, and bincov manifests to batches containing the
+# given families. The subset samples manifest will only contain sample IDs, not
+# batch IDs.
+task SubsetManifestsByFamilies {
+  input {
+    File pesr_manifest
+    File depth_manifest
+    File sample_manifest
+    File bincov_manifest
+    File family_ids
+    File pedigree
+    String linux_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float input_size = size([pesr_manifest, depth_manifest, sample_manifest, bincov_manifest,
+   family_ids, pedigree], "GB")
+
+  RuntimeAttr default_attr = object {
+    mem_gb: 3.75,
+    cpu_cores: 1,
+    disk_gb: ceil(input_size) + 10,
+    boot_disk_gb: 8,
+    preemptible_tries: 2,
+    max_retries: 1
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: linux_docker
+  }
+
+  command <<<
+    set -exuo pipefail
+
+    awk -F'\t' 'NR==FNR && NF==1{a[$1]} NR>FNR && !/^#/ && ($1 in a){print $2}' \
+      '~{family_ids}' '~{pedigree}' \
+      | sort -u > samples.list
+    if [[ $(wc -l samples.list | awk '{print $1}') -eq 0 ]]; then
+      echo 'No matching family IDs found in pedigree.' >&2
+      exit 1
+    fi
+
+    awk -F'\t' 'NR==FNR && NF==1{a[$1]} NR>FNR && ($2 in a){print $1}' \
+      samples.list '~{sample_manifest}' \
+      | sort -u > batches.list 
+    if [[ $(wc -l batches.list | awk '{print $1}') -eq 0 ]]; then
+      echo 'No matching batch IDs found in sample manifest.' >&2
+      exit 1
+    fi
+
+    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a)' batches.list '~{pesr_manifest}' > subset_pesr_manifest.tsv
+    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a)' batches.list '~{depth_manifest}' > subset_depth_manifest.tsv
+    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a)' batches.list '~{bincov_manifest}' > subset_bincov_manifest.tsv
+  >>>
+
+  output {
+    File subset_samples = "samples.list"
+    File subset_pesr_manifest = "subset_pesr_manifest.tsv"
+    File subset_depth_manifest = "subset_depth_manifest.tsv"
+    File subset_bincov_manifest = "subset_bincov_manifest.tsv"
   }
 }
 
@@ -737,70 +807,5 @@ task CleanPed {
         preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
         maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
         docker: variant_interpretation_docker
-    }
-}
-
-task GetBatchedFiles {
-    input {
-        File batch_raw_file
-        File batch_depth_raw_file
-        File family_ids_txt
-        File ped_file
-        File sample_batches
-        File batch_bincov_index
-        String python_docker
-        RuntimeAttr? runtime_attr_override
-    }
-
-    Float input_size = size([batch_raw_file, batch_depth_raw_file, family_ids_txt, ped_file,
-      sample_batches, batch_bincov_index], "GB")
-
-    RuntimeAttr default_attr = object {
-        mem_gb: 3.75,
-        disk_gb: ceil(input_size) + 10,
-        cpu_cores: 1,
-        preemptible_tries: 2,
-        max_retries: 1,
-        boot_disk_gb: 8
-    }
-    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-    output {
-        File batch_raw_files_list = "batch_raw_files_list.txt"
-        File batch_depth_raw_files_list = "batch_depth_raw_files_list.txt"
-        File batch_bincov_index_subset = "batch_bincov_index.txt"
-        File samples = "samples.txt"
-    }
-
-    command {
-        set -exuo pipefail
-
-        if grep -q -w -f ~{family_ids_txt} ~{ped_file}; then
-            grep -w -f ~{family_ids_txt} ~{ped_file} | cut -f2 | sort -u > samples.txt
-        else
-            echo "No matching family IDs from family_ids_txt found in ped_input file." >&2
-            exit 1
-        fi
-
-        if grep -q -w -f samples.txt ~{sample_batches}; then
-            grep -w -f samples.txt ~{sample_batches} | cut -f2 | sort -u > batches.txt
-        else
-            echo "No matching individual IDs found in the sample_batches file." >&2
-            exit 1
-        fi
-
-        grep -w -f batches.txt ~{batch_bincov_index} > batch_bincov_index.txt
-        grep -w -f batches.txt ~{batch_raw_file} > batch_raw_files_list.txt
-        grep -w -f batches.txt ~{batch_depth_raw_file} > batch_depth_raw_files_list.txt
-    }
-
-    runtime {
-        cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-        memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-        disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
-        bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-        preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-        maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-        docker: python_docker
     }
 }
