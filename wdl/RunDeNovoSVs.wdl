@@ -348,7 +348,7 @@ task MakeManifests {
     fi
 
     paste "${batch_names}" '~{write_lines(batch_sample_lists)}' \
-      | awk -F'\t' '{while((getline line < $2) > 0) {print line "\t" $1}}' > 'sample_manifest.tsv'
+      | awk -F'\t' '{while((getline line < $2) > 0) {print $1 "\t" line}}' > 'sample_manifest.tsv'
     
     paste "${batch_names}" '~{write_lines(batch_bincov_matrix)}' '~{write_lines(batch_bincov_matrix_index)}' > 'bincov_manifest.tsv'
   >>>
