@@ -6,217 +6,363 @@ import "TasksMakeCohortVcf.wdl" as miniTasks
 import "DeNovoSVsScatter.wdl" as runDeNovo
 import "Utils.wdl" as util
 
-workflow DeNovoSV {
+workflow deNovoSV {
+  input {
+    File ped_file
+    File vcf_file
+    File? vcf_index
+    Array[String] contigs = ["chr1", "chr2", "chr3", "chr4", "chr5",
+        "chr6", "chr7", "chr8", "chr9", "chr10", "chr11", "chr12", "chr13", "chr14",
+        "chr15", "chr16", "chr17", "chr18", "chr19", "chr20", "chr21", "chr22", "chrX"]
+    File genomic_disorder_input
 
-    input {
-        File vcf_file
-        File? vcf_index
-        File ped_input
-        File batch_raw_file
-        File batch_depth_raw_file
-        File batch_bincov_index
+    Array[String] batch_name_list            # batch IDs
+    Array[File] batch_sample_lists           # samples in each batch (filtered set)
+    Array[String] batch_bincov_matrix
+    Array[String] batch_bincov_matrix_index
+    # VCFs from ClusterBatch
+    Array[String]? clustered_manta_vcf
+    Array[String]? clustered_melt_vcf
+    Array[String]? clustered_wham_vcf
+    Array[String]? clustered_scramble_vcf
+    Array[String] clustered_depth_vcf
 
-        Array[String] contigs
-        String prefix
+    File exclude_regions
+    Int records_per_shard
+    String output_prefix
+    # One family ID per line to call de novo
+    File? family_ids_txt
+    String variant_interpretation_docker
+    String sv_pipeline_updates_docker
+    String sv_base_mini_docker
+    String linux_docker
+    String python_docker
 
-        File? family_ids_txt
+    # Parameters for deNovoSVs.py
+    Int? large_cnv_size
+    String? gnomad_col
+    String? alt_gnomad_col
+    Float? gnomad_af
+    Float? parents_af
+    Float? large_raw_overlap
+    Float? small_raw_overlap
+    Float? cohort_af
+    Int? coverage_cutoff
+    Int? depth_only_size
+    Float? parents_overlap
+    Float? gq_min
+    String? af_column_name
 
-        File python_config
-        File genomic_disorder_input
+    RuntimeAttr? runtime_attr_make_manifests
+    RuntimeAttr? runtime_attr_get_batched_files
+    RuntimeAttr? runtime_attr_subset_by_samples
+    RuntimeAttr? runtime_attr_clean_ped
+    RuntimeAttr? runtime_attr_raw_vcf_to_bed
+    RuntimeAttr? runtime_attr_raw_merge_bed
+    RuntimeAttr? runtime_attr_raw_divide_by_chrom
+    RuntimeAttr? runtime_attr_raw_reformat_bed
+    RuntimeAttr? runtime_attr_gd
+    RuntimeAttr? runtime_attr_subset_vcf
+    RuntimeAttr? runtime_attr_shard_vcf
+    RuntimeAttr? runtime_attr_denovo
+    RuntimeAttr? runtime_attr_denovo_merge_bed
+    RuntimeAttr? runtime_attr_vcf_to_bed
+    RuntimeAttr? runtime_attr_merge_final_bed_files
+    RuntimeAttr? runtime_attr_create_plots
+    RuntimeAttr? runtime_attr_call_outliers
+    RuntimeAttr? runtime_attr_merge_gd
+    RuntimeAttr? runtime_attr_batch_vcf
+    RuntimeAttr? runtime_attr_merge
+  }
 
-        File exclude_regions
-        File sample_batches
+  call MakeManifests {
+    input:
+      batch_name_list = batch_name_list,
+      batch_sample_lists = batch_sample_lists,
+      batch_bincov_matrix = batch_bincov_matrix,
+      batch_bincov_matrix_index = batch_bincov_matrix_index,
+      clustered_manta_vcf = clustered_manta_vcf,
+      clustered_melt_vcf = clustered_melt_vcf,
+      clustered_wham_vcf = clustered_wham_vcf,
+      clustered_scramble_vcf = clustered_scramble_vcf,
+      clustered_depth_vcf = clustered_depth_vcf,
+      runtime_docker = linux_docker,
+      runtime_attr_override = runtime_attr_make_manifests
+  }
 
-        Int records_per_shard
-
-        String variant_interpretation_docker
-        String sv_base_mini_docker
-        String sv_pipeline_updates_docker
-        String python_docker
-        RuntimeAttr? runtime_attr_gd
-        RuntimeAttr? runtime_attr_denovo
-        RuntimeAttr? runtime_attr_raw_vcf_to_bed
-        RuntimeAttr? runtime_attr_raw_merge_bed
-        RuntimeAttr? runtime_attr_subset_vcf
-        RuntimeAttr? runtime_attr_vcf_to_bed
-        RuntimeAttr? runtime_attr_raw_divide_by_chrom
-        RuntimeAttr? runtime_attr_raw_reformat_bed
-        RuntimeAttr? runtime_attr_merge_final_bed_files
-        RuntimeAttr? runtime_attr_create_plots
-        RuntimeAttr? runtime_override_shard_vcf
-        RuntimeAttr? runtime_attr_clean_ped
-        RuntimeAttr? runtime_attr_call_outliers
-        RuntimeAttr? runtime_attr_get_batched_files
-        RuntimeAttr? runtime_attr_subset_by_samples
-        RuntimeAttr? runtime_attr_merge_gd
-        RuntimeAttr? runtime_attr_batch_vcf
-        RuntimeAttr? runtime_attr_merge
+  # If this file is given, subset all other input files to only include the necessary batches.
+  if (defined(family_ids_txt)) {
+    call GetBatchedFiles {
+      input:
+        batch_raw_file = MakeManifests.pesr_manifest,
+        batch_depth_raw_file = MakeManifests.depth_manifest,
+        ped_file = ped_file,
+        family_ids_txt = select_first([family_ids_txt]),
+        sample_batches = MakeManifests.sample_manifest,
+        batch_bincov_index = MakeManifests.bincov_manifest,
+        python_docker = python_docker,
+        runtime_attr_override = runtime_attr_get_batched_files
     }
 
-    # family_ids_txt is a text file containg one family id per line.
-    # If this file is given, subset all other input files to only include the necessary batches.
-    if (defined(family_ids_txt)) {
-        File family_ids_txt_ = select_first([family_ids_txt])
-        call GetBatchedFiles {
-            input:
-                batch_raw_file = batch_raw_file,
-                batch_depth_raw_file = batch_depth_raw_file,
-                ped_input = ped_input,
-                family_ids_txt = family_ids_txt_,
-                sample_batches = sample_batches,
-                batch_bincov_index = batch_bincov_index,
-                python_docker=python_docker,
-                runtime_attr_override = runtime_attr_get_batched_files
-        }
-
-        call util.SubsetVcfBySamplesList {
-            input:
-                vcf = vcf_file,
-                vcf_idx = vcf_index,
-                list_of_samples = GetBatchedFiles.samples,
-                outfile_name = prefix,
-                keep_af = true,
-                remove_private_sites = false,
-                sv_base_mini_docker = sv_base_mini_docker,
-                runtime_attr_override = runtime_attr_subset_by_samples
-        }
+    call util.SubsetVcfBySamplesList {
+      input:
+        vcf = vcf_file,
+        vcf_idx = vcf_index,
+        list_of_samples = GetBatchedFiles.samples,
+        outfile_name = output_prefix,
+        keep_af = true,
+        remove_private_sites = false,
+        sv_base_mini_docker = sv_base_mini_docker,
+        runtime_attr_override = runtime_attr_subset_by_samples
     }
+  }
 
-    # Makes a ped file of singletons, duos, and trios for input into the de novo script (only including families of interest)
-    call CleanPed {
-        input:
-            ped_input = ped_input,
-            vcf_input = select_first([SubsetVcfBySamplesList.vcf_subset, vcf_file]),
-            variant_interpretation_docker=variant_interpretation_docker,
-            runtime_attr_override = runtime_attr_clean_ped
-    }
+  # Makes a ped file of singletons, duos, and trios for input into the de novo script (only including families of interest)
+  call CleanPed {
+    input:
+      ped_file = ped_file,
+      vcf_input = select_first([SubsetVcfBySamplesList.vcf_subset, vcf_file]),
+      variant_interpretation_docker=variant_interpretation_docker,
+      runtime_attr_override = runtime_attr_clean_ped
+  }
+
+  # Splits raw files into probands and parents and reformats to have chrom_svtype_sample as the first column for probands and chrom_svtype_famid as the first column for parents
+  call raw.ReformatRawFiles as ReformatRawFiles {
+    input:
+      contigs = contigs,
+      raw_files_list = select_first([GetBatchedFiles.batch_raw_files_list, MakeManifests.pesr_manifest]),
+      ped_input = CleanPed.cleaned_ped,
+      depth = false,
+      variant_interpretation_docker = variant_interpretation_docker,
+      sv_base_mini_docker = sv_base_mini_docker,
+      runtime_attr_vcf_to_bed = runtime_attr_raw_vcf_to_bed,
+      runtime_attr_merge_bed = runtime_attr_raw_merge_bed,
+      runtime_attr_divide_by_chrom = runtime_attr_raw_divide_by_chrom,
+      runtime_attr_reformat_bed = runtime_attr_raw_reformat_bed
+  }
 
     # Splits raw files into probands and parents and reformats to have chrom_svtype_sample as the first column for probands and chrom_svtype_famid as the first column for parents
-    call raw.ReformatRawFiles as ReformatRawFiles {
-        input:
-            contigs = contigs,
-            raw_files_list = select_first([GetBatchedFiles.batch_raw_files_list, batch_raw_file]),
-            ped_input = CleanPed.cleaned_ped,
-            depth = false,
-            variant_interpretation_docker = variant_interpretation_docker,
-            sv_base_mini_docker = sv_base_mini_docker,
-            runtime_attr_vcf_to_bed = runtime_attr_raw_vcf_to_bed,
-            runtime_attr_merge_bed = runtime_attr_raw_merge_bed,
-            runtime_attr_divide_by_chrom = runtime_attr_raw_divide_by_chrom,
-            runtime_attr_reformat_bed = runtime_attr_raw_reformat_bed
-    }
-
-    # Splits raw files into probands and parents and reformats to have chrom_svtype_sample as the first column for probands and chrom_svtype_famid as the first column for parents
-    call raw.ReformatRawFiles as ReformatDepthRawFiles {
-        input:
-            contigs = contigs,
-            raw_files_list = select_first([GetBatchedFiles.batch_depth_raw_files_list, batch_depth_raw_file]),
-            ped_input = CleanPed.cleaned_ped,
-            depth = true,
-            variant_interpretation_docker = variant_interpretation_docker,
-            sv_base_mini_docker = sv_base_mini_docker,
-            runtime_attr_vcf_to_bed = runtime_attr_raw_vcf_to_bed,
-            runtime_attr_merge_bed = runtime_attr_raw_merge_bed,
-            runtime_attr_divide_by_chrom = runtime_attr_raw_divide_by_chrom,
-            runtime_attr_reformat_bed = runtime_attr_raw_reformat_bed
-    }
+  call raw.ReformatRawFiles as ReformatDepthRawFiles {
+    input:
+      contigs = contigs,
+      raw_files_list = select_first([GetBatchedFiles.batch_depth_raw_files_list, MakeManifests.depth_manifest]),
+      ped_input = CleanPed.cleaned_ped,
+      depth = true,
+      variant_interpretation_docker = variant_interpretation_docker,
+      sv_base_mini_docker = sv_base_mini_docker,
+      runtime_attr_vcf_to_bed = runtime_attr_raw_vcf_to_bed,
+      runtime_attr_merge_bed = runtime_attr_raw_merge_bed,
+      runtime_attr_divide_by_chrom = runtime_attr_raw_divide_by_chrom,
+      runtime_attr_reformat_bed = runtime_attr_raw_reformat_bed
+  }
     
-    scatter (i in range(length(contigs))) {
-        # Generates a list of genomic disorder regions in the vcf input as well as in the depth raw files
-        call GetGenomicDisorders {
-            input:
-                genomic_disorder_input=genomic_disorder_input,
-                ped = ped_input,
-                vcf_file = select_first([SubsetVcfBySamplesList.vcf_subset, vcf_file]),
-                depth_raw_file_proband = ReformatDepthRawFiles.reformatted_proband_raw_files[i],
-                depth_raw_file_parents = ReformatDepthRawFiles.reformatted_parents_raw_files[i],
-                chromosome=contigs[i],
-                variant_interpretation_docker=variant_interpretation_docker,
-                runtime_attr_override = runtime_attr_gd
-        }
+  scatter (i in range(length(contigs))) {
+    # Generates a list of genomic disorder regions in the vcf input as well as in the depth raw files
+    call GetGenomicDisorders {
+      input:
+        genomic_disorder_input=genomic_disorder_input,
+        ped = CleanPed.cleaned_ped,
+        vcf_file = select_first([SubsetVcfBySamplesList.vcf_subset, vcf_file]),
+        depth_raw_file_proband = ReformatDepthRawFiles.reformatted_proband_raw_files[i],
+        depth_raw_file_parents = ReformatDepthRawFiles.reformatted_parents_raw_files[i],
+        chromosome=contigs[i],
+        variant_interpretation_docker=variant_interpretation_docker,
+        runtime_attr_override = runtime_attr_gd
+    }
 
-        # Splits vcf by chromosome
-        call SubsetVcf {
-            input:
-                vcf_file = select_first([SubsetVcfBySamplesList.vcf_subset, vcf_file]),
-                chromosome=contigs[i],
-                variant_interpretation_docker=variant_interpretation_docker,
-                runtime_attr_override = runtime_attr_subset_vcf
-        }
+    # Splits vcf by chromosome
+    call SubsetVcf {
+      input:
+        vcf_file = select_first([SubsetVcfBySamplesList.vcf_subset, vcf_file]),
+        chromosome=contigs[i],
+        variant_interpretation_docker=variant_interpretation_docker,
+        runtime_attr_override = runtime_attr_subset_vcf
+    }
 
-        # Shards vcf
-        call miniTasks.ScatterVcf as ScatterVcf {
-            input:
-                vcf=SubsetVcf.vcf_output,
-                prefix=prefix,
-                records_per_shard=records_per_shard,
-                sv_pipeline_docker=sv_pipeline_updates_docker,
-                runtime_attr_override=runtime_override_shard_vcf
-        }
+    # Shards vcf
+    call miniTasks.ScatterVcf as ScatterVcf {
+      input:
+        vcf = SubsetVcf.vcf_output,
+        prefix = output_prefix,
+        records_per_shard = records_per_shard,
+        sv_pipeline_docker = sv_pipeline_updates_docker,
+        runtime_attr_override = runtime_attr_shard_vcf
+    }
+
+    # Runs the de novo calling python script on each shard and outputs a per chromosome list of de novo SVs
+    call runDeNovo.DeNovoSVsScatter as GetDeNovo {
+      input:
+        ped_input = CleanPed.cleaned_ped,
+        vcf_files = ScatterVcf.shards,
+        disorder_input = GetGenomicDisorders.gd_output_for_denovo,
+        chromosome = contigs[i],
+        raw_proband = ReformatRawFiles.reformatted_proband_raw_files[i],
+        raw_parents = ReformatRawFiles.reformatted_parents_raw_files[i],
+        raw_depth_proband = ReformatDepthRawFiles.reformatted_proband_raw_files[i],
+        raw_depth_parents = ReformatDepthRawFiles.reformatted_parents_raw_files[i],
+        exclude_regions = exclude_regions,
+        sample_batches = MakeManifests.sample_manifest,
+        batch_bincov_index = select_first([GetBatchedFiles.batch_bincov_index_subset, MakeManifests.bincov_manifest]),
+        large_cnv_size = large_cnv_size,
+        gnomad_col = gnomad_col,
+        alt_gnomad_col = alt_gnomad_col,
+        gnomad_af = gnomad_af,
+        parents_af = parents_af,
+        large_raw_overlap = large_raw_overlap,
+        small_raw_overlap = small_raw_overlap,
+        cohort_af = cohort_af,
+        coverage_cutoff = coverage_cutoff,
+        depth_only_size = depth_only_size,
+        parents_overlap = parents_overlap,
+        gq_min = gq_min,
+        af_column_name = af_column_name,
+        variant_interpretation_docker=variant_interpretation_docker,
+        runtime_attr_denovo = runtime_attr_denovo,
+        runtime_attr_vcf_to_bed = runtime_attr_vcf_to_bed,
+        runtime_attr_merge_bed = runtime_attr_denovo_merge_bed
+    }
+  }
+
+  # Merges the per chromosome final de novo SV outputs
+  call MergeDenovoBedFiles {
+    input:
+      bed_files = GetDeNovo.per_chromosome_final_output_file,
+      variant_interpretation_docker=variant_interpretation_docker,
+      runtime_attr_override = runtime_attr_merge_final_bed_files
+  }
+
+  # Outputs a final callset of de novo SVs as well as outlier de novo SV calls
+  call CallOutliers {
+    input:
+      bed_file = MergeDenovoBedFiles.merged_denovo_output,
+      variant_interpretation_docker=variant_interpretation_docker,
+      runtime_attr_override = runtime_attr_call_outliers
+  }
+
+  # Generates plots for QC
+  call CreatePlots {
+    input:
+      bed_file = CallOutliers.final_denovo_nonOutliers_output,
+      ped_file = ped_file,
+      variant_interpretation_docker=variant_interpretation_docker,
+      runtime_attr_override = runtime_attr_create_plots
+  }
+
+  # Merges the genomic disorder region output from each chromosome to compile a list of genomic disorder regions
+  call MergeGenomicDisorders {
+    input:
+      genomic_disorder_input = GetGenomicDisorders.gd_output_from_depth_raw_files,
+      variant_interpretation_docker=variant_interpretation_docker,
+      runtime_attr_override = runtime_attr_merge_gd
+  }
+
+  output {
+    File cleaned_ped = CleanPed.cleaned_ped
+    File final_denovo_nonOutliers = CallOutliers.final_denovo_nonOutliers_output
+    File final_denovo_outliers = CallOutliers.final_denovo_outliers_output
+    File final_denovo_nonOutliers_plots = CreatePlots.output_plots
+    Array [File] denovo_output_annotated = GetDeNovo.per_chromosome_annotation_output_file
+    File gd_depth = MergeGenomicDisorders.gd_output_from_depth
+    File gd_vcf = GetGenomicDisorders.gd_output_from_final_vcf[1]
+  }
+}
+
+# Convert the input arrays into files that are needed by other tasks in the workflow.
+task MakeManifests {
+  input {
+    Array[String] batch_name_list
+    Array[File] batch_sample_lists
+    # These are not really optional. They should correspond to the raw algorithms
+    # used to generate the callset used to run the workflow, but making them optional
+    # is the only way to allow for different algorithms in different versions of
+    # GATK-SV.
+    Array[String]? clustered_manta_vcf
+    Array[String]? clustered_melt_vcf
+    Array[String]? clustered_wham_vcf
+    Array[String]? clustered_scramble_vcf
+    Array[String] clustered_depth_vcf
+    Array[String] batch_bincov_matrix
+    Array[String] batch_bincov_matrix_index
+    String runtime_docker
+
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float input_size = size(batch_sample_lists, "GB")
+  RuntimeAttr default_attr = object {
+    mem_gb: 1,
+    cpu_cores: 1,
+    disk_gb: ceil(input_size) + 16,
+    boot_disk_gb: 10,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_override = select_first([runtime_attr_override, default_attr])
+
+  Array[String] manta_vcfs = select_first([clustered_manta_vcf, []])
+  Array[String] melt_vcfs = select_first([clustered_melt_vcf, []])
+  Array[String] wham_vcfs = select_first([clustered_wham_vcf, []])
+  Array[String] scramble_vcfs = select_first([clustered_scramble_vcf, []])
+
+  runtime {
+    memory: "${select_first([runtime_override.mem_gb, default_attr.mem_gb])} GB"
+    cpu: select_first([runtime_override.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk ${select_first([runtime_override.disk_gb, default_attr.disk_gb])} HDD"
+    bootDiskSizeGb: select_first([runtime_override.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_override.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_override.max_retries, default_attr.max_retries])
+    docker: runtime_docker
+  }
+
+  command <<<
+    set -euo pipefail
+
+    batch_names='~{write_lines(batch_name_list)}'
+
+    paste "${batch_names}" '~{write_lines(clustered_depth_vcf)}' > 'depth_manifest.tsv'
+
+    manta='~{if length(manta_vcfs) > 0 then write_lines(manta_vcfs) else ""}'
+    melt='~{if length(melt_vcfs) > 0 then write_lines(melt_vcfs) else ""}'
+    wham='~{if length(wham_vcfs) > 0 then write_lines(wham_vcfs) else ""}'
+    scramble='~{if length(scramble_vcfs) > 0 then write_lines(scramble_vcfs) else ""}'
+
+    pesr_manifest='pesr_manifest.tsv'
+    : > "${pesr_manifest}"
+
+    if [[ "${manta}" ]]; then
+        paste "${batch_names}" "${manta}" >> "${pesr_manifest}"
+    fi
+    if [[ "${melt}" ]]; then
+        paste "${batch_names}" "${melt}" >> "${pesr_manifest}"
+    fi
+    if [[ "${wham}" ]]; then
+        paste "${batch_names}" "${wham}" >> "${pesr_manifest}"
+    fi
+    if [[ "${scramble}" ]]; then
+        paste "${batch_names}" "${scramble}" >> "${pesr_manifest}"
+    fi
+
+    if [[ ! -s "${pesr_manifest}" ]]; then
+        printf 'at least one non-empty list of PESR evidence VCF lists should be provided\n' >&2
+        exit 1
+    fi
+
+    paste "${batch_names}" '~{write_lines(batch_sample_lists)}' \
+      | awk -F'\t' '{while((getline line < $2) > 0) {print line "\t" $1}}' > 'sample_manifest.tsv'
     
-        # Runs the de novo calling python script on each shard and outputs a per chromosome list of de novo SVs
-        call runDeNovo.DeNovoSVsScatter as GetDeNovo {
-            input:
-                ped_input=CleanPed.cleaned_ped,
-                vcf_files=ScatterVcf.shards,
-                disorder_input=GetGenomicDisorders.gd_output_for_denovo,
-                chromosome=contigs[i],
-                raw_proband=ReformatRawFiles.reformatted_proband_raw_files[i],
-                raw_parents=ReformatRawFiles.reformatted_parents_raw_files[i],
-                raw_depth_proband=ReformatDepthRawFiles.reformatted_proband_raw_files[i],
-                raw_depth_parents=ReformatDepthRawFiles.reformatted_parents_raw_files[i],
-                exclude_regions = exclude_regions,
-                sample_batches = sample_batches,
-                batch_bincov_index = select_first([GetBatchedFiles.batch_bincov_index_subset, batch_bincov_index]),
-                python_config=python_config,
-                variant_interpretation_docker=variant_interpretation_docker,
-                runtime_attr_denovo = runtime_attr_denovo,
-                runtime_attr_vcf_to_bed = runtime_attr_vcf_to_bed
-        }
-    }
+    paste "${batch_names}" '~{write_lines(batch_bincov_matrix)}' '~{write_lines(batch_bincov_matrix_index)}' > 'bincov_manifest.tsv'
+  >>>
 
-    # Merges the per chromosome final de novo SV outputs
-    call MergeDenovoBedFiles {
-        input:
-            bed_files = GetDeNovo.per_chromosome_final_output_file,
-            variant_interpretation_docker=variant_interpretation_docker,
-            runtime_attr_override = runtime_attr_merge_final_bed_files
-    }
-
-    # Outputs a final callset of de novo SVs as well as outlier de novo SV calls
-    call CallOutliers {
-        input:
-            bed_file = MergeDenovoBedFiles.merged_denovo_output,
-            variant_interpretation_docker=variant_interpretation_docker,
-            runtime_attr_override = runtime_attr_call_outliers
-    }
-
-    # Generates plots for QC
-    call CreatePlots {
-        input:
-            bed_file = CallOutliers.final_denovo_nonOutliers_output,
-            ped_input = ped_input,
-            variant_interpretation_docker=variant_interpretation_docker,
-            runtime_attr_override = runtime_attr_create_plots
-    }
-
-    # Merges the genomic disorder region output from each chromosome to compile a list of genomic disorder regions
-    call MergeGenomicDisorders {
-        input:
-            genomic_disorder_input=GetGenomicDisorders.gd_output_from_depth_raw_files,
-            variant_interpretation_docker=variant_interpretation_docker,
-            runtime_attr_override = runtime_attr_merge_gd
-    }
-
-    output {
-        File cleaned_ped = CleanPed.cleaned_ped
-        File final_denovo_nonOutliers = CallOutliers.final_denovo_nonOutliers_output
-        File final_denovo_outliers = CallOutliers.final_denovo_outliers_output
-        File final_denovo_nonOutliers_plots = CreatePlots.output_plots
-        Array [File] denovo_output_annotated = GetDeNovo.per_chromosome_annotation_output_file
-        File gd_depth = MergeGenomicDisorders.gd_output_from_depth
-        File gd_vcf = GetGenomicDisorders.gd_output_from_final_vcf[1]
-    }
+  # depth_manifest: BATCH_ID CLUSTERED_DEPTH_VCF_PATH
+  # pesr_manifest: BATCH_ID CLUSTERED_*_VCF_PATH
+  # bincov_manifest: BATCH_ID BINCOV_MATRIX_PATH BINCOV_MATRIX_INDEX_PATH
+  # sample_manifest: BATCH_ID SAMPLE_ID
+  output {
+    File depth_manifest = "depth_manifest.tsv"
+    File pesr_manifest = "pesr_manifest.tsv"
+    File bincov_manifest = "bincov_manifest.tsv"
+    File sample_manifest = "sample_manifest.tsv"
+  }
 }
 
 task SubsetVcf {
@@ -500,12 +646,12 @@ task CreatePlots {
 
     input {
         File bed_file
-        File ped_input
+        File ped_file
         String variant_interpretation_docker
         RuntimeAttr? runtime_attr_override
     }
 
-    Float input_size = size(select_all([bed_file, ped_input]), "GB")
+    Float input_size = size(select_all([bed_file, ped_file]), "GB")
 
     RuntimeAttr default_attr = object {
         mem_gb: 16, # 3.75
@@ -525,7 +671,7 @@ task CreatePlots {
     command {
         set -exuo pipefail
 
-        Rscript /src/denovo/denovo_sv_plots.R ~{bed_file} ~{ped_input} output_plots.pdf
+        Rscript /src/denovo/denovo_sv_plots.R ~{bed_file} ~{ped_file} output_plots.pdf
     }
 
     runtime {
@@ -540,15 +686,14 @@ task CreatePlots {
 }
 
 task CleanPed {
-
     input {
-        File ped_input
+        File ped_file
         File vcf_input
         String variant_interpretation_docker
         RuntimeAttr? runtime_attr_override
     }
 
-    Float ped_size = size(ped_input, "GB")
+    Float ped_size = size(ped_file, "GB")
     Float vcf_size = size(vcf_input, "GB")
 
     RuntimeAttr default_attr = object {
@@ -571,7 +716,7 @@ task CleanPed {
 
         # TODO: this script should get the name of the output file it generates as an input argument.
         # The output filename is currently hardcoded to be 'clean_ped.txt'.
-        Rscript /src/denovo/clean_ped.R ~{ped_input}
+        Rscript /src/denovo/clean_ped.R ~{ped_file}
         cut -f2 cleaned_ped.txt | awk 'NR > 1' > all_samples.txt
         bcftools query -l ~{vcf_input} > samples_to_include_in_ped.txt
 
@@ -596,29 +741,28 @@ task CleanPed {
 }
 
 task GetBatchedFiles {
-
     input {
         File batch_raw_file
         File batch_depth_raw_file
         File family_ids_txt
-        File ped_input
+        File ped_file
         File sample_batches
         File batch_bincov_index
         String python_docker
         RuntimeAttr? runtime_attr_override
     }
 
-    Float input_size = size(select_all([batch_raw_file, batch_depth_raw_file, ped_input, sample_batches, batch_bincov_index, family_ids_txt]), "GB")
+    Float input_size = size([batch_raw_file, batch_depth_raw_file, family_ids_txt, ped_file,
+      sample_batches, batch_bincov_index], "GB")
 
     RuntimeAttr default_attr = object {
         mem_gb: 3.75,
-        disk_gb: ceil(10 + input_size),
+        disk_gb: ceil(input_size) + 10,
         cpu_cores: 1,
         preemptible_tries: 2,
         max_retries: 1,
         boot_disk_gb: 8
     }
-    
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
 
     output {
@@ -631,8 +775,8 @@ task GetBatchedFiles {
     command {
         set -exuo pipefail
 
-        if grep -q -w -f ~{family_ids_txt} ~{ped_input}; then
-            grep -w -f ~{family_ids_txt} ~{ped_input} | cut -f2 | sort -u > samples.txt
+        if grep -q -w -f ~{family_ids_txt} ~{ped_file}; then
+            grep -w -f ~{family_ids_txt} ~{ped_file} | cut -f2 | sort -u > samples.txt
         else
             echo "No matching family IDs from family_ids_txt found in ped_input file." >&2
             exit 1
