@@ -28,6 +28,17 @@ workflow FilterGenotypes {
     # For SanitizeHeader - bcftools annotate -x ~{header_drop_fields}
     String header_drop_fields = "FILTER/LOW_QUALITY,FORMAT/TRUTH_CN_EQUAL,FORMAT/GT_FILTER,FORMAT/CONC_ST,INFO/STATUS,INFO/TRUTH_AC,INFO/TRUTH_AN,INFO/TRUTH_AF,INFO/TRUTH_VID,INFO/CNV_CONCORDANCE,INFO/GENOTYPE_CONCORDANCE,INFO/HET_PPV,INFO/HET_SENSITIVITY,INFO/HOMVAR_PPV,INFO/HOMVAR_SENSITIVITY,INFO/MINSL,INFO/NON_REF_GENOTYPE_CONCORDANCE,INFO/SL_MAX,INFO/SL_MEAN,INFO/VAR_PPV,INFO/VAR_SENSITIVITY,INFO/VAR_SPECIFICITY"
 
+    RuntimeAttr? runtime_override_recalibrate_scatter
+    RuntimeAttr? runtime_override_recalibrate_concat
+    RuntimeAttr? runtime_override_optim_scatter
+    RuntimeAttr? runtime_override_optim_table
+    RuntimeAttr? runtime_override_optim_concat
+    RuntimeAttr? runtime_override_optim
+    RuntimeAttr? runtime_override_filter_scatter
+    RuntimeAttr? runtime_override_filter
+    RuntimeAttr? runtime_override_filter_concat
+    RuntimeAttr? runtime_override_sanitize
+
     # For MainVcfQc
     File primary_contigs_fai
     File? ped_file
@@ -59,7 +70,9 @@ workflow FilterGenotypes {
       genome_tracks=genome_tracks,
       gatk_docker=gatk_docker,
       sv_base_mini_docker=sv_base_mini_docker,
-      sv_pipeline_docker=sv_pipeline_docker
+      sv_pipeline_docker=sv_pipeline_docker,
+      runtime_override_scatter = runtime_override_recalibrate_scatter,
+      runtime_override_scatter = runtime_override_recalibrate_concat
   }
 
   if (defined(truth_json)) {
@@ -68,7 +81,8 @@ workflow FilterGenotypes {
         vcf=RecalibrateGq.filtered_vcf,
         records_per_shard=optimize_vcf_records_per_shard,
         prefix="~{output_prefix_}.filter_genotypes_scatter",
-        sv_pipeline_docker=sv_pipeline_docker
+        sv_pipeline_docker=sv_pipeline_docker,
+        runtime_attr_override = runtime_override_optim_scatter
     }
     scatter ( i in range(length(ScatterForOptimization.shards)) ) {
       call MakeVcfTable {
@@ -76,7 +90,8 @@ workflow FilterGenotypes {
           vcf=ScatterForOptimization.shards[i],
           truth_json=select_first([truth_json]),
           output_prefix="~{output_prefix_}.vcf_table_shard_~{i}",
-          sv_pipeline_docker=sv_pipeline_docker
+          sv_pipeline_docker=sv_pipeline_docker,
+          runtime_attr_override = runtime_override_optim_table
       }
     }
     call tasks_cohort.ConcatHeaderedTextFiles {
@@ -84,14 +99,16 @@ workflow FilterGenotypes {
         text_files=MakeVcfTable.out,
         gzipped=true,
         output_filename="~{output_prefix_}.vcf_table.tsv.gz",
-        linux_docker=linux_docker
+        linux_docker=linux_docker,
+        runtime_attr_override = runtime_override_optim_concat
     }
     call OptimizeCutoffs {
       input:
         table=ConcatHeaderedTextFiles.out,
         fmax_beta=fmax_beta,
         output_prefix="~{output_prefix_}.sl_optimization",
-        sv_pipeline_docker=sv_pipeline_docker
+        sv_pipeline_docker=sv_pipeline_docker,
+        runtime_attr_override = runtime_override_optim
     }
   }
 
@@ -100,7 +117,8 @@ workflow FilterGenotypes {
       vcf=RecalibrateGq.filtered_vcf,
       records_per_shard=filter_vcf_records_per_shard,
       prefix="~{output_prefix_}.filter_genotypes_scatter",
-      sv_pipeline_docker=sv_pipeline_docker
+      sv_pipeline_docker=sv_pipeline_docker,
+      runtime_attr_override = runtime_override_filter_scatter
   }
 
   scatter ( i in range(length(ScatterForFilter.shards)) ) {
@@ -111,7 +129,8 @@ workflow FilterGenotypes {
         ploidy_table=ploidy_table,
         args=select_first([OptimizeCutoffs.filter_args, sl_filter_args]) + " --ncr-threshold ~{no_call_rate_cutoff}",
         output_prefix="~{output_prefix_}.filter_genotypes.shard_~{i}",
-        sv_pipeline_docker=sv_pipeline_docker
+        sv_pipeline_docker=sv_pipeline_docker,
+        runtime_attr_override = runtime_override_filter
     }
   }
 
@@ -120,7 +139,8 @@ workflow FilterGenotypes {
       vcfs=FilterVcf.out,
       naive=true,
       outfile_prefix="~{output_prefix_}.filter_genotypes",
-      sv_base_mini_docker=sv_base_mini_docker
+      sv_base_mini_docker=sv_base_mini_docker,
+      runtime_attr_override = runtime_override_filter_concat
   }
 
   call SanitizeHeader {
@@ -129,7 +149,8 @@ workflow FilterGenotypes {
       vcf_index = ConcatVcfs.concat_vcf_idx,
       drop_fields = header_drop_fields,
       prefix = "~{output_prefix_}.filter_genotypes.sanitized",
-      sv_pipeline_docker = sv_pipeline_docker
+      sv_pipeline_docker = sv_pipeline_docker,
+      runtime_attr_override = runtime_override_sanitize
   }
 
   if (run_qc) {

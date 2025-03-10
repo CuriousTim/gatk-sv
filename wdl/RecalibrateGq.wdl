@@ -1,5 +1,6 @@
 version 1.0
 
+import "Structs.wdl"
 import "TrainGqRecalibrator.wdl" as TrainGqRecalibrator
 import "TasksMakeCohortVcf.wdl" as tasks_cohort
 import "Utils.wdl" as Utils
@@ -17,6 +18,8 @@ workflow RecalibrateGq {
         String sv_pipeline_docker
         Float recalibrate_gq_mem_gb_java = 9.0
         Float recalibrate_gq_mem_gb_overhead = 1.5
+        RuntimeAttr? runtime_override_scatter
+        RuntimeAttr? runtime_override_concat
     }
 
     call tasks_cohort.ScatterVcf {
@@ -24,7 +27,8 @@ workflow RecalibrateGq {
             vcf=vcf,
             records_per_shard=select_first([recalibrate_records_per_shard, 20000]),
             prefix=basename(vcf, ".vcf.gz") + ".scatter",
-            sv_pipeline_docker=sv_pipeline_docker
+            sv_pipeline_docker=sv_pipeline_docker,
+            runtime_attr_override = runtime_override_scatter
     }
 
     scatter ( i in range(length(ScatterVcf.shards)) ) {
@@ -45,7 +49,8 @@ workflow RecalibrateGq {
             vcfs=RecalibrateGqTask.filtered_vcf,
             naive=true,
             outfile_prefix=basename(vcf, ".vcf.gz") + ".gq_recalibrated",
-            sv_base_mini_docker=sv_pipeline_docker
+            sv_base_mini_docker=sv_pipeline_docker,
+            runtime_attr_override = runtime_override_concat
     }
 
     output {

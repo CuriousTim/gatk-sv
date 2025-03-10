@@ -44,6 +44,32 @@ workflow FilterGenotypesSharded {
     String gatk_docker
     String sv_base_mini_docker
     String sv_pipeline_docker
+
+    # RecalibrateGq.TasksMakeCohortVcf.ScatterVcf
+    RuntimeAttr? runtime_override_recalibrate_scatter
+    # RecalibrateGq.TasksMakeCohortVcf.ConcatVcfs
+    RuntimeAttr? runtime_override_recalibrate_concat
+
+    # MakeVcfTable
+    # TasksMakeCohortVcf.Scatter
+    RuntimeAttr? runtime_override_optim_scatter
+    # MakeVcfTable
+    RuntimeAttr? runtime_override_optim_table
+    # TaskMakeCohortVcf.ConcatHeaderedTextFiles
+    RuntimeAttr? runtime_override_optim_concat
+    # OptimzeCutoffs
+    RuntimeAttr? runtime_override_optim
+
+    # FilterVcf
+    # TaskMakeCohortVcf.ScatterVcf
+    RuntimeAttr? runtime_override_filter_scatter
+    # FilterVcf
+    RuntimeAttr? runtime_override_filter
+    # TaskMakeCohortVcf.ConcatVcfs
+    RuntimeAttr? runtime_override_filter_concat
+
+    # SanitizeHeader
+    RuntimeAttr? runtime_override_sanitize
   }
 
   scatter (vcf in vcfs) {
@@ -66,7 +92,18 @@ workflow FilterGenotypesSharded {
         linux_docker = linux_docker,
         gatk_docker = gatk_docker,
         sv_base_mini_docker = sv_base_mini_docker,
-        sv_pipeline_docker = sv_pipeline_docker
+        sv_pipeline_docker = sv_pipeline_docker,
+
+        runtime_override_recalibrate_scatter = runtime_override_recalibrate_scatter,
+        runtime_override_recalibrate_concat = runtime_override_recalibrate_concat,
+        runtime_override_optim_scatter = runtime_override_optim_scatter,
+        runtime_override_optim_table = runtime_override_optim_table,
+        runtime_override_optim_concat = runtime_override_optim_concat,
+        runtime_override_optim = runtime_override_optim,
+        runtime_override_filter_scatter = runtime_override_filter_scatter,
+        runtime_override_filter = runtime_override_filter,
+        runtime_override_filter_concat = runtime_override_filter_concat,
+        runtime_override_sanitize = runtime_override_sanitize
     }
   }
 
