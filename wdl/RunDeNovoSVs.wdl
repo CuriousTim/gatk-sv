@@ -262,6 +262,222 @@ workflow DeNovoSV {
 # TASK DEFINITION
 ###########################
 
+############ makeManifests ############
+task makeManifests {
+    input {
+        Array[String] batch_name_list
+        Array[File] batch_sample_lists
+        Array[String]? clustered_manta_vcf
+        Array[String]? clustered_melt_vcf
+        Array[String]? clustered_wham_vcf
+        Array[String]? clustered_scramble_vcf
+        Array[String] clustered_depth_vcf
+        Array[String] batch_bincov_matrix
+        Array[String] batch_bincov_matrix_index
+        String runtime_docker
+
+        RuntimeAttr? runtime_attr_override
+    }
+
+    Float input_size = size(batch_sample_lists, "GB")
+    RuntimeAttr runtime_default = object {
+                                      mem_gb: 1,
+                                      disk_gb: 16 + ceil(input_size),
+                                      cpu: 1,
+                                      preemptible: 3,
+                                      max_retries: 1,
+                                      boot_disk_gb: 16
+                                    }
+    RuntimeAttr runtime_override = select_first([runtime_attr_override, runtime_default])
+    Array[String] manta_vcfs = select_first([clustered_manta_vcf, []])
+    Array[String] melt_vcfs = select_first([clustered_melt_vcf, []])
+    Array[String] wham_vcfs = select_first([clustered_wham_vcf, []])
+    Array[String] scramble_vcfs = select_first([clustered_scramble_vcf, []])
+
+    runtime {
+        cpu: select_first([runtime_override.cpu, runtime_default.cpu])
+        memory: "${select_first([runtime_override.mem_gb, runtime_default.mem_gb])} GB"
+        disks: "local-disk ${select_first([runtime_override.disk_gb, runtime_default.disk_gb])} HDD"
+        preemptible: select_first([runtime_override.preemptible, runtime_default.preemptible])
+        maxRetries: select_first([runtime_override.max_retries, runtime_default.max_retries])
+        docker: runtime_docker
+        bootDiskSizeGb: select_first([runtime_override.boot_disk_gb, runtime_default.boot_disk_gb])
+    }
+
+    command <<<
+        set -euo pipefail
+
+        batch_names='~{write_lines(batch_name_list)}'
+
+        paste "${batch_names}" '~{write_lines(clustered_depth_vcf)}' > 'depth_manifest.tsv'
+
+        manta='~{if length(manta_vcfs) > 0 then write_lines(manta_vcfs) else ""}'
+        melt='~{if length(melt_vcfs) > 0 then write_lines(melt_vcfs) else ""}'
+        wham='~{if length(wham_vcfs) > 0 then write_lines(wham_vcfs) else ""}'
+        scramble='~{if length(scramble_vcfs) > 0 then write_lines(scramble_vcfs) else ""}'
+
+        pesr_manifest='pesr_manifest.tsv'
+        : > "${pesr_manifest}"
+
+        if [[ "${manta}" ]]; then
+            paste "${batch_names}" "${manta}" >> "${pesr_manifest}"
+        fi
+        if [[ "${melt}" ]]; then
+            paste "${batch_names}" "${melt}" >> "${pesr_manifest}"
+        fi
+        if [[ "${wham}" ]]; then
+            paste "${batch_names}" "${wham}" >> "${pesr_manifest}"
+        fi
+        if [[ "${scramble}" ]]; then
+            paste "${batch_names}" "${scramble}" >> "${pesr_manifest}"
+        fi
+
+        if [[ ! -s "${pesr_manifest}" ]]; then
+            printf 'at least one non-empty list of PESR evidence VCF lists should be provided\n' >&2
+            exit 1
+        fi
+
+        paste "${batch_names}" '~{write_lines(batch_sample_lists)}' \
+          | awk -F'\t' '{while((getline line < $2) > 0) {print line "\t" $1}}' > 'sample_manifest.tsv'
+        
+        paste "${batch_names}" '~{write_lines(batch_bincov_matrix)}' '~{write_lines(batch_bincov_matrix_index)}' > 'bincov_manifest.tsv'
+    >>>
+
+    output {
+        File depth_manifest = "depth_manifest.tsv"
+        File pesr_manifest = "pesr_manifest.tsv"
+        File bincov_manifest = "bincov_manifest.tsv"
+        File sample_manifest = "sample_manifest.tsv"
+    }
+}
+
+
+############ GetBatchedFiles ############
+task GetBatchedFiles {
+
+    input {
+        File batch_raw_file
+        File batch_depth_raw_file
+        File family_ids_txt
+        File ped_input
+        File sample_batches
+        File batch_bincov_index
+        String python_docker
+        RuntimeAttr? runtime_attr_override
+    }
+
+    Float input_size = size(select_all([batch_raw_file, batch_depth_raw_file, ped_input, sample_batches, batch_bincov_index, family_ids_txt]), "GB")
+
+    RuntimeAttr default_attr = object {
+        mem_gb: 3.75,
+        disk_gb: ceil(10 + input_size),
+        cpu_cores: 1,
+        preemptible_tries: 2,
+        max_retries: 1,
+        boot_disk_gb: 8
+    }
+    
+    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+    output {
+        File batch_raw_files_list = "batch_raw_files_list.txt"
+        File batch_depth_raw_files_list = "batch_depth_raw_files_list.txt"
+        File batch_bincov_index_subset = "batch_bincov_index.txt"
+        File samples = "samples.txt"
+    }
+
+    command {
+        set -exuo pipefail
+
+        if grep -q -w -f ~{family_ids_txt} ~{ped_input}; then
+            grep -w -f ~{family_ids_txt} ~{ped_input} | cut -f2 | sort -u > samples.txt
+        else
+            echo "No matching family IDs from family_ids_txt found in ped_input file." >&2
+            exit 1
+        fi
+
+        if grep -q -w -f samples.txt ~{sample_batches}; then
+            grep -w -f samples.txt ~{sample_batches} | cut -f2 | sort -u > batches.txt
+        else
+            echo "No matching individual IDs found in the sample_batches file." >&2
+            exit 1
+        fi
+
+        grep -w -f batches.txt ~{batch_bincov_index} > batch_bincov_index.txt
+        grep -w -f batches.txt ~{batch_raw_file} > batch_raw_files_list.txt
+        grep -w -f batches.txt ~{batch_depth_raw_file} > batch_depth_raw_files_list.txt
+    }
+
+    runtime {
+        cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+        memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+        disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+        bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+        preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+        maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+        docker: python_docker
+    }
+}
+
+
+############ CleanPed ############
+task CleanPed {
+
+    input {
+        File ped_input
+        File vcf_input
+        String variant_interpretation_docker
+        RuntimeAttr? runtime_attr_override
+    }
+
+    Float ped_size = size(ped_input, "GB")
+    Float vcf_size = size(vcf_input, "GB")
+
+    RuntimeAttr default_attr = object {
+        mem_gb: 3.75,
+        disk_gb: ceil(10 + vcf_size + ped_size * 1.5),
+        cpu_cores: 1,
+        preemptible_tries: 2,
+        max_retries: 1,
+        boot_disk_gb: 8
+    }
+    
+    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+    output {
+        File cleaned_ped = "subset_cleaned_ped.txt"
+    }
+
+    command {
+        set -exuo pipefail
+
+        # TODO: this script should get the name of the output file it generates as an input argument.
+        # The output filename is currently hardcoded to be 'clean_ped.txt'.
+        Rscript /src/denovo/clean_ped.R ~{ped_input}
+        cut -f2 cleaned_ped.txt | awk 'NR > 1' > all_samples.txt
+        bcftools query -l ~{vcf_input} > samples_to_include_in_ped.txt
+
+        # Note: grep returns a non-success exit code (i.e., other than `0`) when it cannot find the
+        # match in the following scripts. We do not expect it to find a match for every entry.
+        # Hence, to avoid exit with unsuccessful code, we can either drop pipefail from above or use `|| true`.
+
+        grep -w -v -f samples_to_include_in_ped.txt all_samples.txt > excluded_samples.txt || true
+        grep -w -f excluded_samples.txt cleaned_ped.txt | cut -f1 | sort -u > excluded_families.txt || true
+        grep -w -v -f excluded_families.txt cleaned_ped.txt > subset_cleaned_ped.txt || true
+    }
+
+    runtime {
+        cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+        memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+        disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+        bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+        preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+        maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+        docker: variant_interpretation_docker
+    }
+}
+
+
 ############ SubsetVcf ############
 task SubsetVcf {
 
@@ -448,218 +664,3 @@ task CreatePlots {
     }
 }
 
-
-############ CleanPed ############
-task CleanPed {
-
-    input {
-        File ped_input
-        File vcf_input
-        String variant_interpretation_docker
-        RuntimeAttr? runtime_attr_override
-    }
-
-    Float ped_size = size(ped_input, "GB")
-    Float vcf_size = size(vcf_input, "GB")
-
-    RuntimeAttr default_attr = object {
-        mem_gb: 3.75,
-        disk_gb: ceil(10 + vcf_size + ped_size * 1.5),
-        cpu_cores: 1,
-        preemptible_tries: 2,
-        max_retries: 1,
-        boot_disk_gb: 8
-    }
-    
-    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-    output {
-        File cleaned_ped = "subset_cleaned_ped.txt"
-    }
-
-    command {
-        set -exuo pipefail
-
-        # TODO: this script should get the name of the output file it generates as an input argument.
-        # The output filename is currently hardcoded to be 'clean_ped.txt'.
-        Rscript /src/denovo/clean_ped.R ~{ped_input}
-        cut -f2 cleaned_ped.txt | awk 'NR > 1' > all_samples.txt
-        bcftools query -l ~{vcf_input} > samples_to_include_in_ped.txt
-
-        # Note: grep returns a non-success exit code (i.e., other than `0`) when it cannot find the
-        # match in the following scripts. We do not expect it to find a match for every entry.
-        # Hence, to avoid exit with unsuccessful code, we can either drop pipefail from above or use `|| true`.
-
-        grep -w -v -f samples_to_include_in_ped.txt all_samples.txt > excluded_samples.txt || true
-        grep -w -f excluded_samples.txt cleaned_ped.txt | cut -f1 | sort -u > excluded_families.txt || true
-        grep -w -v -f excluded_families.txt cleaned_ped.txt > subset_cleaned_ped.txt || true
-    }
-
-    runtime {
-        cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-        memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-        disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
-        bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-        preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-        maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-        docker: variant_interpretation_docker
-    }
-}
-
-
-############ GetBatchedFiles ############
-task GetBatchedFiles {
-
-    input {
-        File batch_raw_file
-        File batch_depth_raw_file
-        File family_ids_txt
-        File ped_input
-        File sample_batches
-        File batch_bincov_index
-        String python_docker
-        RuntimeAttr? runtime_attr_override
-    }
-
-    Float input_size = size(select_all([batch_raw_file, batch_depth_raw_file, ped_input, sample_batches, batch_bincov_index, family_ids_txt]), "GB")
-
-    RuntimeAttr default_attr = object {
-        mem_gb: 3.75,
-        disk_gb: ceil(10 + input_size),
-        cpu_cores: 1,
-        preemptible_tries: 2,
-        max_retries: 1,
-        boot_disk_gb: 8
-    }
-    
-    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-    output {
-        File batch_raw_files_list = "batch_raw_files_list.txt"
-        File batch_depth_raw_files_list = "batch_depth_raw_files_list.txt"
-        File batch_bincov_index_subset = "batch_bincov_index.txt"
-        File samples = "samples.txt"
-    }
-
-    command {
-        set -exuo pipefail
-
-        if grep -q -w -f ~{family_ids_txt} ~{ped_input}; then
-            grep -w -f ~{family_ids_txt} ~{ped_input} | cut -f2 | sort -u > samples.txt
-        else
-            echo "No matching family IDs from family_ids_txt found in ped_input file." >&2
-            exit 1
-        fi
-
-        if grep -q -w -f samples.txt ~{sample_batches}; then
-            grep -w -f samples.txt ~{sample_batches} | cut -f2 | sort -u > batches.txt
-        else
-            echo "No matching individual IDs found in the sample_batches file." >&2
-            exit 1
-        fi
-
-        grep -w -f batches.txt ~{batch_bincov_index} > batch_bincov_index.txt
-        grep -w -f batches.txt ~{batch_raw_file} > batch_raw_files_list.txt
-        grep -w -f batches.txt ~{batch_depth_raw_file} > batch_depth_raw_files_list.txt
-    }
-
-    runtime {
-        cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-        memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-        disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
-        bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-        preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-        maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-        docker: python_docker
-    }
-}
-
-
-############ makeManifests ############
-task makeManifests {
-    input {
-        Array[String] batch_name_list
-        Array[File] batch_sample_lists
-        Array[String]? clustered_manta_vcf
-        Array[String]? clustered_melt_vcf
-        Array[String]? clustered_wham_vcf
-        Array[String]? clustered_scramble_vcf
-        Array[String] clustered_depth_vcf
-        Array[String] batch_bincov_matrix
-        Array[String] batch_bincov_matrix_index
-        String runtime_docker
-
-        RuntimeAttr? runtime_attr_override
-    }
-
-    Float input_size = size(batch_sample_lists, "GB")
-    RuntimeAttr runtime_default = object {
-                                      mem_gb: 1,
-                                      disk_gb: 16 + ceil(input_size),
-                                      cpu: 1,
-                                      preemptible: 3,
-                                      max_retries: 1,
-                                      boot_disk_gb: 16
-                                    }
-    RuntimeAttr runtime_override = select_first([runtime_attr_override, runtime_default])
-    Array[String] manta_vcfs = select_first([clustered_manta_vcf, []])
-    Array[String] melt_vcfs = select_first([clustered_melt_vcf, []])
-    Array[String] wham_vcfs = select_first([clustered_wham_vcf, []])
-    Array[String] scramble_vcfs = select_first([clustered_scramble_vcf, []])
-
-    runtime {
-        cpu: select_first([runtime_override.cpu, runtime_default.cpu])
-        memory: "${select_first([runtime_override.mem_gb, runtime_default.mem_gb])} GB"
-        disks: "local-disk ${select_first([runtime_override.disk_gb, runtime_default.disk_gb])} HDD"
-        preemptible: select_first([runtime_override.preemptible, runtime_default.preemptible])
-        maxRetries: select_first([runtime_override.max_retries, runtime_default.max_retries])
-        docker: runtime_docker
-        bootDiskSizeGb: select_first([runtime_override.boot_disk_gb, runtime_default.boot_disk_gb])
-    }
-
-    command <<<
-        set -euo pipefail
-
-        batch_names='~{write_lines(batch_name_list)}'
-
-        paste "${batch_names}" '~{write_lines(clustered_depth_vcf)}' > 'depth_manifest.tsv'
-
-        manta='~{if length(manta_vcfs) > 0 then write_lines(manta_vcfs) else ""}'
-        melt='~{if length(melt_vcfs) > 0 then write_lines(melt_vcfs) else ""}'
-        wham='~{if length(wham_vcfs) > 0 then write_lines(wham_vcfs) else ""}'
-        scramble='~{if length(scramble_vcfs) > 0 then write_lines(scramble_vcfs) else ""}'
-
-        pesr_manifest='pesr_manifest.tsv'
-        : > "${pesr_manifest}"
-
-        if [[ "${manta}" ]]; then
-            paste "${batch_names}" "${manta}" >> "${pesr_manifest}"
-        fi
-        if [[ "${melt}" ]]; then
-            paste "${batch_names}" "${melt}" >> "${pesr_manifest}"
-        fi
-        if [[ "${wham}" ]]; then
-            paste "${batch_names}" "${wham}" >> "${pesr_manifest}"
-        fi
-        if [[ "${scramble}" ]]; then
-            paste "${batch_names}" "${scramble}" >> "${pesr_manifest}"
-        fi
-
-        if [[ ! -s "${pesr_manifest}" ]]; then
-            printf 'at least one non-empty list of PESR evidence VCF lists should be provided\n' >&2
-            exit 1
-        fi
-
-        paste "${batch_names}" '~{write_lines(batch_sample_lists)}' \
-          | awk -F'\t' '{while((getline line < $2) > 0) {print line "\t" $1}}' > 'sample_manifest.tsv'
-        
-        paste "${batch_names}" '~{write_lines(batch_bincov_matrix)}' '~{write_lines(batch_bincov_matrix_index)}' > 'bincov_manifest.tsv'
-    >>>
-
-    output {
-        File depth_manifest = "depth_manifest.tsv"
-        File pesr_manifest = "pesr_manifest.tsv"
-        File bincov_manifest = "bincov_manifest.tsv"
-        File sample_manifest = "sample_manifest.tsv"
-    }
-}
