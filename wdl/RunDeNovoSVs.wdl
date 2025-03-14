@@ -18,48 +18,102 @@ workflow DeNovoSV {
 
     # Define the input values for the workflow
     input {
-        File vcf_file
-        File? vcf_index
+
+        # Core input files
         File ped_input
-        File batch_raw_file
-        File batch_depth_raw_file
-        File batch_bincov_index
-
-        Array[String] contigs
-        String prefix
-
-        File? family_ids_txt
-
-        File python_config
-        File genomic_disorder_input
-
+        File? family_ids_txt                   # Kept it for the moment in case we wantto do test runs on family subsets
+        File vcf_file
+        File vcf_file_index                    # Used to be optional; reason to make it mandatory?
+        File genomic_disorder_input            # Remove if/when we remove the GetGenomicDisorders task
         File exclude_regions
-        File sample_batches
 
+        # Running parameters
+        String prefix
         Int records_per_shard
+        Array[String] contigs = ["chr1", "chr2", "chr3", "chr4", "chr5", 
+                                "chr6", "chr7", "chr8", "chr9", "chr10", "chr11", "chr12", "chr13", "chr14",
+                                "chr15", "chr16", "chr17", "chr18", "chr19", "chr20", "chr21", "chr22", "chrX"]
 
+        # Fetch raw data
+        Array[String] batch_name_list
+        Array[File] batch_sample_lists
+        Array[String] batch_bincov_matrix
+        Array[String] batch_bincov_matrix_index
+        Array[String]? clustered_manta_vcf
+        Array[String]? clustered_melt_vcf
+        Array[String]? clustered_wham_vcf
+        Array[String]? clustered_scramble_vcf
+        Array[String] clustered_depth_vcf
+
+        # Parameters for denovo_svs.py with default values
+        # Size parameters
+        Int large_cnv_size = 1000            # To be renamed
+        Int intermediate_cnv_size = 5000     # New! To implement
+        Int depth_only_size = 10000          # To be renamed
+        # Allele frequency
+        Float gnomad_af = 0.01
+        Float parents_af = 0.05
+        Float cohort_af = 0.05
+        # Overlap parameters
+        Float large_raw_overlap = 0.5
+        Float small_raw_overlap = 0.5
+        Float parents_overlap = 0.5
+        Float blacklist_overlap = 0.5         # New! To implement
+        Int nearby_insertion = 100            # New! To implement
+        # SV quality (parents)
+        Int coverage_cutoff = 10
+        Float gq_min = 0
+        # Other
+        String gnomad_col = gnomAD_V2_AF
+        String alt_gnomad_col = gnomad_v2.1_sv_AF     # Check if that one is necessary
+        String? af_column_name                        # Not sure what this one is? 
+
+        # Parameters for denovo_outliers.py with default values
+        #Int denovo_outlier_factor = 3     # New! To implement
+
+        # Dockers
         String variant_interpretation_docker
-        String sv_base_mini_docker
         String sv_pipeline_updates_docker
-        String python_docker
-        RuntimeAttr? runtime_attr_gd
-        RuntimeAttr? runtime_attr_denovo
-        RuntimeAttr? runtime_attr_raw_vcf_to_bed
-        RuntimeAttr? runtime_attr_raw_merge_bed
-        RuntimeAttr? runtime_attr_subset_vcf
-        RuntimeAttr? runtime_attr_vcf_to_bed
-        RuntimeAttr? runtime_attr_raw_divide_by_chrom
-        RuntimeAttr? runtime_attr_raw_reformat_bed
-        RuntimeAttr? runtime_attr_merge_final_bed_files
-        RuntimeAttr? runtime_attr_create_plots
-        RuntimeAttr? runtime_override_shard_vcf
-        RuntimeAttr? runtime_attr_clean_ped
-        RuntimeAttr? runtime_attr_call_outliers
+        String linux_docker
+        String python_docker                                # Kept this one in in case we'd like to make use of the possibility to run on a subset of the cohort
+        String sv_base_mini_docker                          # I saw that you removed that one and also removed it in the code; Ok to do that on this version as well? 
+
+        # Runtime attributes (ordered by task calling)
+        RuntimeAttr? runtime_attr_make_manifests
         RuntimeAttr? runtime_attr_get_batched_files
         RuntimeAttr? runtime_attr_subset_by_samples
-        RuntimeAttr? runtime_attr_merge_gd
-        RuntimeAttr? runtime_attr_batch_vcf
-        RuntimeAttr? runtime_attr_merge
+        RuntimeAttr? runtime_attr_clean_ped
+        RuntimeAttr? runtime_attr_vcf_to_bed
+        RuntimeAttr? runtime_attr_raw_vcf_to_bed
+        RuntimeAttr? runtime_attr_raw_merge_bed
+        RuntimeAttr? runtime_attr_raw_divide_by_chrom
+        RuntimeAttr? runtime_attr_raw_reformat_bed
+        RuntimeAttr? runtime_attr_gd                        # Remove if/when we remove the GetGenomicDisorders task
+        RuntimeAttr? runtime_attr_subset_vcf
+        RuntimeAttr? runtime_attr_shard_vcf
+        RuntimeAttr? runtime_attr_denovo
+        RuntimeAttr? runtime_attr_merge_final_bed_files
+        RuntimeAttr? runtime_attr_call_outliers
+        RuntimeAttr? runtime_attr_create_plots
+        RuntimeAttr? runtime_attr_merge_gd                   # Remove if/when we remove the MergeGenomicDisorders task
+        # Removed attributes: not used anywhere: runtime_attr_merge, runtime_attr_batch_vcf (this one was kept in the denovo-dev branch from variant-interpretation but I couldn't find it being used)
+
+    }
+
+    # Create text files with the paths of the raw data used by the workflow
+    call makeManifests {
+        input:
+            batch_name_list = batch_name_list,
+            batch_sample_lists = batch_sample_lists,
+            batch_bincov_matrix = batch_bincov_matrix,
+            batch_bincov_matrix_index = batch_bincov_matrix_index,
+            clustered_manta_vcf = clustered_manta_vcf,
+            clustered_melt_vcf = clustered_melt_vcf,
+            clustered_wham_vcf = clustered_wham_vcf,
+            clustered_scramble_vcf = clustered_scramble_vcf,
+            clustered_depth_vcf = clustered_depth_vcf,
+            runtime_docker = linux_docker,
+            runtime_attr_override = runtime_attr_make_manifests
     }
 
     # If family_ids_txt is provided (text file with one family_id/line for all families to be analyzed), subset all other input files to only include the necessary batches.
@@ -161,7 +215,7 @@ workflow DeNovoSV {
                 prefix=prefix,
                 records_per_shard=records_per_shard,
                 sv_pipeline_docker=sv_pipeline_updates_docker,
-                runtime_attr_override=runtime_override_shard_vcf
+                runtime_attr_override=runtime_attr_shard_vcf
         }
     
         # Runs the de novo calling python script on each shard and outputs a per chromosome list of de novo SVs
@@ -685,5 +739,95 @@ task GetBatchedFiles {
         preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
         maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
         docker: python_docker
+    }
+}
+
+
+############ makeManifests ############
+task makeManifests {
+    input {
+        Array[String] batch_name_list
+        Array[File] batch_sample_lists
+        Array[String]? clustered_manta_vcf
+        Array[String]? clustered_melt_vcf
+        Array[String]? clustered_wham_vcf
+        Array[String]? clustered_scramble_vcf
+        Array[String] clustered_depth_vcf
+        Array[String] batch_bincov_matrix
+        Array[String] batch_bincov_matrix_index
+        String runtime_docker
+
+        RuntimeAttr? runtime_attr_override
+    }
+
+    Float input_size = size(batch_sample_lists, "GB")
+    RuntimeAttr runtime_default = object {
+                                      mem_gb: 1,
+                                      disk_gb: 16 + ceil(input_size),
+                                      cpu: 1,
+                                      preemptible: 3,
+                                      max_retries: 1,
+                                      boot_disk_gb: 16
+                                    }
+    RuntimeAttr runtime_override = select_first([runtime_attr_override, runtime_default])
+    Array[String] manta_vcfs = select_first([clustered_manta_vcf, []])
+    Array[String] melt_vcfs = select_first([clustered_melt_vcf, []])
+    Array[String] wham_vcfs = select_first([clustered_wham_vcf, []])
+    Array[String] scramble_vcfs = select_first([clustered_scramble_vcf, []])
+
+    runtime {
+        cpu: select_first([runtime_override.cpu, runtime_default.cpu])
+        memory: "${select_first([runtime_override.mem_gb, runtime_default.mem_gb])} GB"
+        disks: "local-disk ${select_first([runtime_override.disk_gb, runtime_default.disk_gb])} HDD"
+        preemptible: select_first([runtime_override.preemptible, runtime_default.preemptible])
+        maxRetries: select_first([runtime_override.max_retries, runtime_default.max_retries])
+        docker: runtime_docker
+        bootDiskSizeGb: select_first([runtime_override.boot_disk_gb, runtime_default.boot_disk_gb])
+    }
+
+    command <<<
+        set -euo pipefail
+
+        batch_names='~{write_lines(batch_name_list)}'
+
+        paste "${batch_names}" '~{write_lines(clustered_depth_vcf)}' > 'depth_manifest.tsv'
+
+        manta='~{if length(manta_vcfs) > 0 then write_lines(manta_vcfs) else ""}'
+        melt='~{if length(melt_vcfs) > 0 then write_lines(melt_vcfs) else ""}'
+        wham='~{if length(wham_vcfs) > 0 then write_lines(wham_vcfs) else ""}'
+        scramble='~{if length(scramble_vcfs) > 0 then write_lines(scramble_vcfs) else ""}'
+
+        pesr_manifest='pesr_manifest.tsv'
+        : > "${pesr_manifest}"
+
+        if [[ "${manta}" ]]; then
+            paste "${batch_names}" "${manta}" >> "${pesr_manifest}"
+        fi
+        if [[ "${melt}" ]]; then
+            paste "${batch_names}" "${melt}" >> "${pesr_manifest}"
+        fi
+        if [[ "${wham}" ]]; then
+            paste "${batch_names}" "${wham}" >> "${pesr_manifest}"
+        fi
+        if [[ "${scramble}" ]]; then
+            paste "${batch_names}" "${scramble}" >> "${pesr_manifest}"
+        fi
+
+        if [[ ! -s "${pesr_manifest}" ]]; then
+            printf 'at least one non-empty list of PESR evidence VCF lists should be provided\n' >&2
+            exit 1
+        fi
+
+        paste "${batch_names}" '~{write_lines(batch_sample_lists)}' \
+          | awk -F'\t' '{while((getline line < $2) > 0) {print line "\t" $1}}' > 'sample_manifest.tsv'
+        
+        paste "${batch_names}" '~{write_lines(batch_bincov_matrix)}' '~{write_lines(batch_bincov_matrix_index)}' > 'bincov_manifest.tsv'
+    >>>
+
+    output {
+        File depth_manifest = "depth_manifest.tsv"
+        File pesr_manifest = "pesr_manifest.tsv"
+        File bincov_manifest = "bincov_manifest.tsv"
+        File sample_manifest = "sample_manifest.tsv"
     }
 }
