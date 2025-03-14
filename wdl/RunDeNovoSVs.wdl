@@ -258,7 +258,6 @@ task SubsetVcf {
 
     output {
         File vcf_output = "~{chromosome}.vcf.gz"
-        File no_header_vcf_output = "~{chromosome}.noheader.vcf.gz"
     }
 
     command <<<
@@ -266,7 +265,6 @@ task SubsetVcf {
 
         bcftools index ~{vcf_file}
         bcftools view ~{vcf_file} --regions ~{chromosome} -O z -o  ~{chromosome}.vcf.gz
-        bcftools view ~{chromosome}.vcf.gz | grep -v ^## | bgzip -c > ~{chromosome}.noheader.vcf.gz
     >>>
 
     runtime {
