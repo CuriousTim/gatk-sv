@@ -1,13 +1,22 @@
 version 1.0
-    
+
+###########################
+# IMPORT TOOLS
+###########################
+
 import "Structs.wdl"
 import "ReformatRawFiles.wdl" as raw
 import "TasksMakeCohortVcf.wdl" as miniTasks
 import "DeNovoSVsScatter.wdl" as runDeNovo
 import "Utils.wdl" as util
 
+###########################
+# MAIN WORKFLOW DEFINITION
+###########################
+
 workflow DeNovoSV {
 
+    # Define the input values for the workflow
     input {
         File vcf_file
         File? vcf_index
@@ -53,8 +62,7 @@ workflow DeNovoSV {
         RuntimeAttr? runtime_attr_merge
     }
 
-    # family_ids_txt is a text file containg one family id per line.
-    # If this file is given, subset all other input files to only include the necessary batches.
+    # If family_ids_txt is provided (text file with one family_id/line for all families to be analyzed), subset all other input files to only include the necessary batches.
     if (defined(family_ids_txt)) {
         File family_ids_txt_ = select_first([family_ids_txt])
         call GetBatchedFiles {
@@ -120,8 +128,10 @@ workflow DeNovoSV {
             runtime_attr_divide_by_chrom = runtime_attr_raw_divide_by_chrom,
             runtime_attr_reformat_bed = runtime_attr_raw_reformat_bed
     }
-    
+
+    # Scatter following tasks across chromosomes: GetGenomicDisorders; SubsetVcf; ScatterVcf (miniTasks.ScatterVcf); GetDeNovo (runDeNovo.DeNovoSVsScatter)
     scatter (i in range(length(contigs))) {
+
         # Generates a list of genomic disorder regions in the vcf input as well as in the depth raw files
         call GetGenomicDisorders {
             input:
@@ -219,6 +229,11 @@ workflow DeNovoSV {
     }
 }
 
+###########################
+# TASK DEFINITION
+###########################
+
+############ SubsetVcf ############
 task SubsetVcf {
 
     input {
@@ -265,6 +280,8 @@ task SubsetVcf {
     }
 }
 
+
+############ GetGenomicDisorders ############
 task GetGenomicDisorders {
 
     input {
@@ -361,6 +378,8 @@ task GetGenomicDisorders {
     }
 }
 
+
+############ MergeGenomicDisorders ############
 task MergeGenomicDisorders {
 
     input {
@@ -404,6 +423,8 @@ task MergeGenomicDisorders {
     }
 }
 
+
+############ MergeDenovoBedFiles ############
 task MergeDenovoBedFiles {
 
     input {
@@ -448,6 +469,8 @@ task MergeDenovoBedFiles {
     }
 }
 
+
+############ CallOutliers ############
 task CallOutliers {
 
     input {
@@ -496,6 +519,8 @@ task CallOutliers {
     }
 }
 
+
+############ CreatePlots ############
 task CreatePlots {
 
     input {
@@ -539,6 +564,8 @@ task CreatePlots {
     }
 }
 
+
+############ CleanPed ############
 task CleanPed {
 
     input {
@@ -595,6 +622,8 @@ task CleanPed {
     }
 }
 
+
+############ GetBatchedFiles ############
 task GetBatchedFiles {
 
     input {
