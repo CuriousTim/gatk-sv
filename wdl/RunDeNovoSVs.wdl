@@ -24,7 +24,7 @@ workflow DeNovoSV {
         File? family_ids_txt                   # Kept it for the moment in case we wantto do test runs on family subsets
         File vcf_file
         File vcf_file_index                    # Used to be optional; reason to make it mandatory?
-        File genomic_disorder_input            # Remove if/when we remove the GetGenomicDisorders task
+        File genomic_disorder_input            # Remove if/when we remove the GetGenomicDisorders task? Possibly keep in case we want to use the file for filtering within the python script.
         File exclude_regions
 
         # Running parameters
@@ -88,15 +88,13 @@ workflow DeNovoSV {
         RuntimeAttr? runtime_attr_raw_merge_bed
         RuntimeAttr? runtime_attr_raw_divide_by_chrom
         RuntimeAttr? runtime_attr_raw_reformat_bed
-        RuntimeAttr? runtime_attr_gd                        # Remove if/when we remove the GetGenomicDisorders task
         RuntimeAttr? runtime_attr_subset_vcf
         RuntimeAttr? runtime_attr_shard_vcf
         RuntimeAttr? runtime_attr_denovo
         RuntimeAttr? runtime_attr_merge_final_bed_files
         RuntimeAttr? runtime_attr_call_outliers
         RuntimeAttr? runtime_attr_create_plots
-        RuntimeAttr? runtime_attr_merge_gd                   # Remove if/when we remove the MergeGenomicDisorders task
-        # Removed attributes: not used anywhere: runtime_attr_merge, runtime_attr_batch_vcf (this one was kept in the denovo-dev branch from variant-interpretation but I couldn't find it being used)
+        # Removed attributes: not used anywhere: runtime_attr_merge, runtime_attr_batch_vcf (this one was kept in the denovo-dev branch from variant-interpretation but I couldn't find it being used), runtime_attr_gd & runtime_attr_merge_gd (tasks were deleted)
 
     }
 
@@ -183,21 +181,8 @@ workflow DeNovoSV {
             runtime_attr_reformat_bed = runtime_attr_raw_reformat_bed
     }
 
-    # Scatter following tasks across chromosomes: GetGenomicDisorders; SubsetVcf; ScatterVcf (miniTasks.ScatterVcf); GetDeNovo (runDeNovo.DeNovoSVsScatter)
+    # Scatter following tasks across chromosomes: SubsetVcf; ScatterVcf (miniTasks.ScatterVcf); GetDeNovo (runDeNovo.DeNovoSVsScatter)
     scatter (i in range(length(contigs))) {
-
-        # Generates a list of genomic disorder regions in the vcf input as well as in the depth raw files
-        call GetGenomicDisorders {
-            input:
-                genomic_disorder_input=genomic_disorder_input,
-                ped = ped_input,
-                vcf_file = select_first([SubsetVcfBySamplesList.vcf_subset, vcf_file]),
-                depth_raw_file_proband = ReformatDepthRawFiles.reformatted_proband_raw_files[i],
-                depth_raw_file_parents = ReformatDepthRawFiles.reformatted_parents_raw_files[i],
-                chromosome=contigs[i],
-                variant_interpretation_docker=variant_interpretation_docker,
-                runtime_attr_override = runtime_attr_gd
-        }
 
         # Splits vcf by chromosome
         call SubsetVcf {
@@ -223,7 +208,6 @@ workflow DeNovoSV {
             input:
                 ped_input=CleanPed.cleaned_ped,
                 vcf_files=ScatterVcf.shards,
-                disorder_input=GetGenomicDisorders.gd_output_for_denovo,
                 chromosome=contigs[i],
                 raw_proband=ReformatRawFiles.reformatted_proband_raw_files[i],
                 raw_parents=ReformatRawFiles.reformatted_parents_raw_files[i],
@@ -264,24 +248,15 @@ workflow DeNovoSV {
             runtime_attr_override = runtime_attr_create_plots
     }
 
-    # Merges the genomic disorder region output from each chromosome to compile a list of genomic disorder regions
-    call MergeGenomicDisorders {
-        input:
-            genomic_disorder_input=GetGenomicDisorders.gd_output_from_depth_raw_files,
-            variant_interpretation_docker=variant_interpretation_docker,
-            runtime_attr_override = runtime_attr_merge_gd
-    }
-
     output {
         File cleaned_ped = CleanPed.cleaned_ped
         File final_denovo_nonOutliers = CallOutliers.final_denovo_nonOutliers_output
         File final_denovo_outliers = CallOutliers.final_denovo_outliers_output
         File final_denovo_nonOutliers_plots = CreatePlots.output_plots
         Array [File] denovo_output_annotated = GetDeNovo.per_chromosome_annotation_output_file
-        File gd_depth = MergeGenomicDisorders.gd_output_from_depth
-        File gd_vcf = GetGenomicDisorders.gd_output_from_final_vcf[1]
     }
 }
+
 
 ###########################
 # TASK DEFINITION
@@ -320,149 +295,6 @@ task SubsetVcf {
         bcftools index ~{vcf_file}
         bcftools view ~{vcf_file} --regions ~{chromosome} -O z -o  ~{chromosome}.vcf.gz
     >>>
-
-    runtime {
-        cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-        memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-        disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
-        bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-        preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-        maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-        docker: variant_interpretation_docker
-    }
-}
-
-
-############ GetGenomicDisorders ############
-task GetGenomicDisorders {
-
-    input {
-        File vcf_file
-        File ped
-        File depth_raw_file_proband
-        File depth_raw_file_parents
-        String chromosome
-        File genomic_disorder_input
-        String variant_interpretation_docker
-        RuntimeAttr? runtime_attr_override
-    }
-
-    Float input_size = size(select_all([vcf_file, ped, genomic_disorder_input, depth_raw_file_parents, depth_raw_file_proband]), "GB")
-
-    RuntimeAttr default_attr = object {
-        mem_gb: 3.75,
-        disk_gb: ceil(10 + input_size),
-        cpu_cores: 1,
-        preemptible_tries: 2,
-        max_retries: 1,
-        boot_disk_gb: 8
-    }
-
-    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-    output {
-        File gd_output_from_final_vcf = "gd.variants.from.final.vcf.txt.gz"
-        File gd_output_from_depth_raw_files = "~{chromosome}.gd.variants.in.depth.raw.files.txt.gz"
-        File gd_output_for_denovo = "annotated.gd.variants.names.txt"
-    }
-
-    command <<<
-        set -euxo pipefail
-
-        sort -k1,1 -k2,2n ~{genomic_disorder_input} > sorted.genomic.txt
-        bedtools intersect -wa -wb -f 0.3 -r -a ~{vcf_file} -b ~{genomic_disorder_input} | cut -f 3 |sort -u > annotated.gd.variants.names.txt
-        
-        echo "Done with first line"
-
-        bedtools intersect -wa -wb -f 0.3 -r -a ~{vcf_file} -b ~{genomic_disorder_input} > gd.variants.from.final.vcf.txt
-        bgzip gd.variants.from.final.vcf.txt
-
-        echo "Done with GD from vcf"
-        
-        Rscript /src/denovo/create_per_sample_bed.R ~{genomic_disorder_input} unsorted.gd.per.sample.txt unsorted.gd.per.family.txt ~{ped} ~{chromosome}
-        sort -k1,1 -k2,2n unsorted.gd.per.sample.txt > gd.per.sample.txt
-        sort -k1,1 -k2,2n unsorted.gd.per.family.txt > gd.per.family.txt
-        cat ~{depth_raw_file_parents} | gunzip | sort -k1,1 -k2,2n | bgzip -c > sorted.depth.parents.bed.gz
-        cat ~{depth_raw_file_proband} | gunzip | sort -k1,1 -k2,2n | bgzip -c > sorted.depth.proband.bed.gz
-
-        echo "Done with R script"
-
-        bedtools intersect -wa -wb -f 0.3 -r -sorted -a gd.per.sample.txt -b sorted.depth.proband.bed.gz > ~{chromosome}.gd.variants.in.depth.raw.file.proband.txt
-        bedtools intersect -wa -wb -f 0.3 -r -sorted -a gd.per.family.txt -b sorted.depth.parents.bed.gz > ~{chromosome}.gd.variants.in.depth.raw.file.parents.txt
-        
-        echo "done with intersect in depth variants"
-
-        bedtools coverage -wa -wb -sorted -a gd.per.family.txt -b sorted.depth.parents.bed.gz | awk '{if ($NF>=0.30) print }' > ~{chromosome}.coverage.parents.txt
-        bedtools coverage -wa -wb -sorted -a gd.per.sample.txt -b sorted.depth.proband.bed.gz | awk '{if ($NF>=0.30) print }' > ~{chromosome}.coverage.proband.txt
-
-        echo "done with coverage in depth variants"
-
-        cat ~{chromosome}.coverage.parents.txt ~{chromosome}.coverage.proband.txt > ~{chromosome}.coverage.txt
-
-        echo "done with cat"
-
-        bedtools intersect -wa -wb -f 0.3 -sorted -a gd.per.sample.txt -b sorted.depth.proband.bed.gz > ~{chromosome}.gd.variants.in.depth.raw.file.proband.no.r.txt
-        bedtools intersect -wa -wb -f 0.3 -sorted -a gd.per.family.txt -b sorted.depth.parents.bed.gz > ~{chromosome}.gd.variants.in.depth.raw.file.parents.no.r.txt
-
-        echo "done with intersect no -r"
-
-        cat ~{chromosome}.gd.variants.in.depth.raw.file.proband.no.r.txt ~{chromosome}.gd.variants.in.depth.raw.file.parents.no.r.txt > ~{chromosome}.remove.txt
-
-        echo "done with cat"
-
-        bedtools intersect -v -wb -b ~{chromosome}.remove.txt -a ~{chromosome}.coverage.txt > ~{chromosome}.kept.coverage.txt
-
-        echo "done with grep"
-
-        cat ~{chromosome}.gd.variants.in.depth.raw.file.proband.txt ~{chromosome}.gd.variants.in.depth.raw.file.parents.txt ~{chromosome}.kept.coverage.txt > ~{chromosome}.gd.variants.in.depth.raw.files.txt
-        bgzip ~{chromosome}.gd.variants.in.depth.raw.files.txt
-        echo "done with cat"
-    >>>
-
-    runtime {
-        cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-        memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-        disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
-        bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-        preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-        maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-        docker: variant_interpretation_docker
-    }
-}
-
-
-############ MergeGenomicDisorders ############
-task MergeGenomicDisorders {
-
-    input {
-        Array[File] genomic_disorder_input
-        String variant_interpretation_docker
-        RuntimeAttr? runtime_attr_override
-    }
-
-    Float input_size = size(genomic_disorder_input, "GB")
-
-    RuntimeAttr default_attr = object {
-        mem_gb: 3.75,
-        disk_gb: ceil(10 + input_size),
-        cpu_cores: 1,
-        preemptible_tries: 2,
-        max_retries: 1,
-        boot_disk_gb: 8
-    }
-
-    RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-    output {
-        File gd_output_from_depth = "gd.raw.files.output.txt.gz"
-    }
-
-    command {
-        set -euxo pipefail
-
-        zcat ~{sep=" " genomic_disorder_input} > gd.raw.files.output.txt
-        bgzip gd.raw.files.output.txt
-    }
 
     runtime {
         cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
