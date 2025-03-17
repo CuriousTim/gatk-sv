@@ -249,7 +249,7 @@ def get_median_coverage(mom_matrix, dad_matrix, coverage_cutoff):
 
 
 def get_cnv_intersection_depth(bed, raw, overlap):
-    intersect = bed.coverage(raw).to_dataframe(disable_auto_names=True, header=None)
+    intersect = bed.coverage(raw).to_dataframe(disable_auto_names = True, header = None)
     if len(intersect) != 0:
         names_overlap = intersect[intersect[10] > overlap][6].to_list()
     else:
@@ -258,7 +258,7 @@ def get_cnv_intersection_depth(bed, raw, overlap):
 
 
 def get_cnv_intersection_other(bed, raw, overlap):
-    overlap = bed.intersect(raw, wo=True, f=overlap, r=True).to_dataframe(disable_auto_names=True, header=None)
+    overlap = bed.intersect(raw, wo = True, f = overlap, r = True).to_dataframe(disable_auto_names = True, header = None)
     if len(overlap) != 0:
         names_overlap = overlap[6].to_list()
     else:
@@ -267,7 +267,7 @@ def get_cnv_intersection_other(bed, raw, overlap):
 
 
 def get_insertion_intersection(bed, raw):
-    overlap = bed.closest(raw).to_dataframe(disable_auto_names=True, header=None)
+    overlap = bed.closest(raw).to_dataframe(disable_auto_names = True, header = None)
     if len(overlap) != 0:
         overlap['is_close'] = abs(overlap[8] - overlap[1]) < 100
         if sum(bool(x) for x in overlap['is_close']) > 0:
@@ -564,7 +564,7 @@ def main():
         bed_parents_large = pybedtools.BedTool(bed_parents_large, from_string=True).sort()
 
         bed_overlap = bed_child_large.coverage(bed_parents_large).to_dataframe(disable_auto_names=True, header=None)
-        names_overlap = bed_overlap[(bed_overlap[10] >= parents_overlap)][6].to_list()
+        names_overlap = bed_overlap[(bed_overlap[10] > parents_overlap)][6].to_list()
     else:
         names_overlap = ['']
     end = time.time()
@@ -621,10 +621,10 @@ def main():
     bed_filt_ins = bed_child_de_novo[bed_child_de_novo['SVTYPE'] == 'INS']
     if len(bed_filt_ins.index) > 0:
         verbose_print('Checking if insertion in proband is in raw files', verbose)
-        bed_filt_ins_proband = convert_to_bedtool(bed_filt_ins, cols_to_keep=cols_keep_child, sort=True)
+        bed_filt_ins_proband = convert_to_bedtool(bed_filt_ins, cols_to_keep = cols_keep_child, sort = True)
         ins_names_overlap_proband = get_insertion_intersection(bed_filt_ins_proband, raw_bed_ref_child)
         verbose_print('Checking if insertion in proband are also in raw files for the parents', verbose)
-        bed_filt_ins_fam = convert_to_bedtool(bed_filt_ins, cols_to_keep=cols_keep_parent, sort=True)
+        bed_filt_ins_fam = convert_to_bedtool(bed_filt_ins, cols_to_keep = cols_keep_parent, sort = True)
         ins_names_overlap_parent = get_insertion_intersection(bed_filt_ins_fam, raw_bed_ref_parent)
         ins_names_overlap = [x for x in ins_names_overlap_proband if x not in ins_names_overlap_parent]
     else:
@@ -642,10 +642,10 @@ def main():
 
     if len(large_bed_filt_cnv_other.index) > 0:
         verbose_print('Checking if intermediate cnv in proband is in raw files', verbose)
-        bed_filt_cnv_proband_other = convert_to_bedtool(large_bed_filt_cnv_other, cols_to_keep=cols_keep_child, sort=True)
+        bed_filt_cnv_proband_other = convert_to_bedtool(large_bed_filt_cnv_other, cols_to_keep = cols_keep_child, sort = True)
         large_cnv_names_overlap_proband_other = get_cnv_intersection_other(bed_filt_cnv_proband_other, raw_bed_ref_child, large_raw_overlap)
         verbose_print('Checking if intermediate cnvs in proband are also in raw files for the parents', verbose)
-        bed_filt_cnv_fam_other = convert_to_bedtool(large_bed_filt_cnv_other, cols_to_keep=cols_keep_parent, sort=True)
+        bed_filt_cnv_fam_other = convert_to_bedtool(large_bed_filt_cnv_other, cols_to_keep = cols_keep_parent, sort = True)
         large_cnv_names_overlap_parent_other = get_cnv_intersection_other(bed_filt_cnv_fam_other, raw_bed_ref_parent, large_raw_overlap)
         large_cnv_names_overlap_other = [x for x in large_cnv_names_overlap_proband_other if x not in large_cnv_names_overlap_parent_other]
     else:
@@ -653,10 +653,10 @@ def main():
 
     if len(large_bed_filt_cnv_depth.index) > 0:
         verbose_print('Checking if large cnv in proband is in raw files', verbose)
-        bed_filt_cnv_proband_depth = convert_to_bedtool(large_bed_filt_cnv_depth, cols_to_keep=cols_keep_child, sort=True)
+        bed_filt_cnv_proband_depth = convert_to_bedtool(large_bed_filt_cnv_depth, cols_to_keep = cols_keep_child, sort = True)
         large_cnv_names_overlap_proband_depth = get_cnv_intersection_depth(bed_filt_cnv_proband_depth, raw_bed_ref_depth_child, large_raw_overlap)
         verbose_print('Checking if large cnv in proband are also in raw files for the parents', verbose)
-        bed_filt_cnv_fam_depth = convert_to_bedtool(large_bed_filt_cnv_depth, cols_to_keep=cols_keep_parent, sort=True)
+        bed_filt_cnv_fam_depth = convert_to_bedtool(large_bed_filt_cnv_depth, cols_to_keep = cols_keep_parent, sort = True)
         large_cnv_names_overlap_parent_depth = get_cnv_intersection_depth(bed_filt_cnv_fam_depth, raw_bed_ref_depth_parent, large_raw_overlap)
         large_cnv_names_overlap_depth = [x for x in large_cnv_names_overlap_proband_depth if x not in large_cnv_names_overlap_parent_depth]
     else:
@@ -674,10 +674,10 @@ def main():
     small_bed_filt_cnv = bed_child_de_novo[(bed_child_de_novo['is_small_cnv'])]  # We do not want to check against raw depth files if CNV <= 5kb
     if len(small_bed_filt_cnv.index) > 0:
         verbose_print('Checking if small cnv in proband is in raw files', verbose)
-        bed_filt_cnv_proband = convert_to_bedtool(small_bed_filt_cnv, cols_to_keep=cols_keep_child, sort=True)
+        bed_filt_cnv_proband = convert_to_bedtool(small_bed_filt_cnv, cols_to_keep = cols_keep_child, sort = True)
         small_cnv_names_overlap_proband = get_cnv_intersection_other(bed_filt_cnv_proband, raw_bed_ref_child, small_raw_overlap)
         verbose_print('Checking small cnvs in probands are also in raw files for parents', verbose)
-        bed_filt_cnv_fam = convert_to_bedtool(small_bed_filt_cnv, cols_to_keep=cols_keep_parent, sort=True)
+        bed_filt_cnv_fam = convert_to_bedtool(small_bed_filt_cnv, cols_to_keep = cols_keep_parent, sort = True)
         small_cnv_names_overlap_parent = get_cnv_intersection_other(bed_filt_cnv_fam, raw_bed_ref_parent, small_raw_overlap)
         small_cnv_names_overlap = [x for x in small_cnv_names_overlap_proband if x not in small_cnv_names_overlap_parent]
     else:
@@ -702,9 +702,9 @@ def main():
     cols_keep_exclude_regions = ['chrom', 'start', 'end', 'name', 'svtype', 'sample', 'name_famid']
     if len(bed_child.index) > 0:
         bed_child_bt = convert_to_bedtool(bed_child, cols_keep_exclude_regions, sort=True)
-        exclude_regions_intersect = bed_child_bt.coverage(exclue_regions_bt).to_dataframe(disable_auto_names=True, header=None)  # HB said to use bedtools coverage, -f and -F give the same SVs to be removed
+        exclude_regions_intersect = bed_child_bt.coverage(exclue_regions_bt).to_dataframe(disable_auto_names = True, header = None)  # HB said to use bedtools coverage, -f and -F give the same SVs to be removed
         if len(exclude_regions_intersect) != 0:
-            remove_regions = exclude_regions_intersect[exclude_regions_intersect[10] > 0.5][6].to_list()
+            remove_regions = exclude_regions_intersect[exclude_regions_intersect[10] > blacklist_overlap][6].to_list()
         else:
             remove_regions = ['']
     else:
