@@ -70,7 +70,7 @@ workflow DeNovoSV {
         String? af_column_name                        # Not sure what this one is? 
 
         # Parameters for denovo_outliers.py with default values
-        #Int denovo_outlier_factor = 3     # New! To implement
+        Int denovo_outlier_factor = 3             # New
 
         # Dockers
         String variant_interpretation_docker
@@ -117,7 +117,7 @@ workflow DeNovoSV {
 
     # If family_ids_txt is provided (text file with one family_id/line for all families to be analyzed), subset all other input files to only include the necessary batches.
     if (defined(family_ids_txt)) {
-        File family_ids_txt_ = select_first([family_ids_txt])
+        File family_ids_txt = select_first([family_ids_txt])
         call GetBatchedFiles {
             input:
                 batch_raw_file = batch_raw_file,
@@ -126,7 +126,7 @@ workflow DeNovoSV {
                 family_ids_txt = family_ids_txt_,
                 sample_batches = sample_batches,
                 batch_bincov_index = batch_bincov_index,
-                python_docker=python_docker,
+                python_docker = python_docker,
                 runtime_attr_override = runtime_attr_get_batched_files
         }
 
@@ -148,7 +148,7 @@ workflow DeNovoSV {
         input:
             ped_input = ped_input,
             vcf_input = select_first([SubsetVcfBySamplesList.vcf_subset, vcf_file]),
-            variant_interpretation_docker=variant_interpretation_docker,
+            variant_interpretation_docker = variant_interpretation_docker,
             runtime_attr_override = runtime_attr_clean_ped
     }
 
@@ -189,19 +189,19 @@ workflow DeNovoSV {
         call SubsetVcf {
             input:
                 vcf_file = select_first([SubsetVcfBySamplesList.vcf_subset, vcf_file]),
-                chromosome=contigs[i],
-                variant_interpretation_docker=variant_interpretation_docker,
+                chromosome = contigs[i],
+                variant_interpretation_docker = variant_interpretation_docker,
                 runtime_attr_override = runtime_attr_subset_vcf
         }
 
         # Shards vcf
         call miniTasks.ScatterVcf as ScatterVcf {
             input:
-                vcf=SubsetVcf.vcf_output,
-                prefix=prefix,
-                records_per_shard=records_per_shard,
-                sv_pipeline_docker=sv_pipeline_updates_docker,
-                runtime_attr_override=runtime_attr_shard_vcf
+                vcf = SubsetVcf.vcf_output,
+                prefix = prefix,
+                records_per_shard = records_per_shard,
+                sv_pipeline_docker = sv_pipeline_updates_docker,
+                runtime_attr_override = runtime_attr_shard_vcf
         }
     
         # Runs the de novo calling python script on each shard and outputs a per chromosome list of de novo SVs
@@ -218,7 +218,7 @@ workflow DeNovoSV {
                 sample_batches = sample_batches,
                 batch_bincov_index = select_first([GetBatchedFiles.batch_bincov_index_subset, batch_bincov_index]),
                 python_config=python_config,
-                variant_interpretation_docker=variant_interpretation_docker,
+                variant_interpretation_docker = variant_interpretation_docker,
                 runtime_attr_denovo = runtime_attr_denovo,
                 runtime_attr_vcf_to_bed = runtime_attr_vcf_to_bed
         }
@@ -228,7 +228,7 @@ workflow DeNovoSV {
     call MergeDenovoBedFiles {
         input:
             bed_files = GetDeNovo.per_chromosome_final_output_file,
-            variant_interpretation_docker=variant_interpretation_docker,
+            variant_interpretation_docker = variant_interpretation_docker,
             runtime_attr_override = runtime_attr_merge_final_bed_files
     }
 
@@ -236,7 +236,8 @@ workflow DeNovoSV {
     call CallOutliers {
         input:
             bed_file = MergeDenovoBedFiles.merged_denovo_output,
-            variant_interpretation_docker=variant_interpretation_docker,
+            denovo_outlier_factor = denovo_outlier_factor
+            variant_interpretation_docker = variant_interpretation_docker,
             runtime_attr_override = runtime_attr_call_outliers
     }
 
@@ -245,7 +246,7 @@ workflow DeNovoSV {
         input:
             bed_file = CallOutliers.final_denovo_nonOutliers_output,
             ped_input = ped_input,
-            variant_interpretation_docker=variant_interpretation_docker,
+            variant_interpretation_docker = variant_interpretation_docker,
             runtime_attr_override = runtime_attr_create_plots
     }
 
@@ -578,6 +579,7 @@ task CallOutliers {
 
     input {
         File bed_file
+        Int denovo_outlier_factor
         String variant_interpretation_docker
         RuntimeAttr? runtime_attr_override
     }
@@ -604,7 +606,7 @@ task CallOutliers {
     command {
         set -exuo pipefail
 
-        python /src/denovo/denovo_outliers.py --bed ~{bed_file}
+        python /src/denovo/denovo_outliers.py --bed ~{bed_file} --denovo_outlier_factor ~{denovo_outlier_factor}
 
         bgzip final.denovo.merged.bed
         bgzip final.denovo.merged.outliers.bed
