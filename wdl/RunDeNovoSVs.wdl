@@ -47,9 +47,9 @@ workflow DeNovoSV {
 
         # Parameters for denovo_svs.py with default values
         # Size parameters
-        Int large_cnv_size = 1000            # To be renamed
+        Int small_cnv_size = 1000            # Renamed
         Int intermediate_cnv_size = 5000     # New! To implement
-        Int depth_only_size = 10000          # To be renamed
+        Int depth_only_size = 10000 
         # Allele frequency
         Float gnomad_af = 0.01
         Float parents_af = 0.05
