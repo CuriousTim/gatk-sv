@@ -2,6 +2,10 @@
 SV de novo filtering script
 """
 
+###########################
+# IMPORT LIBRARIES
+###########################
+
 import argparse
 import yaml
 import numpy as np
@@ -11,9 +15,12 @@ import collections
 import time
 from subprocess import Popen, PIPE
 
-
 pd.options.mode.chained_assignment = None  # default='warn'
 
+
+###########################
+# DEFINE HELP FUNCTIONS
+###########################
 
 def verbose_print(msg, verbose):
     if verbose == "True":
@@ -270,10 +277,13 @@ def get_insertion_intersection(bed, raw):
     return names_overlap
 
 
+###########################
+# DEFINE MAIN FUNCTION
+###########################
+
 def main():
-    """
-    Parse arguments vcf_metrics
-    """
+
+    # Parse input arguments
     parser = argparse.ArgumentParser(description='Parse arguments')
     parser.add_argument('--bed', dest='bed', help='Input BED file')
     parser.add_argument('--ped', dest='ped', help='Ped file')
@@ -290,7 +300,7 @@ def main():
     parser.add_argument('--sample_batches', dest='sample_batches', help='File with samples in first column and their respective batch in second column')
     parser.add_argument('--verbose', dest='verbose', help='Verbosity')
     args = parser.parse_args()
-
+   
     bed_file = args.bed
     ped_file = args.ped
     vcf_file = args.vcf
@@ -306,23 +316,35 @@ def main():
     coverage = args.coverage
     batches = args.sample_batches
 
+    
+    # Read in parameter values from the configuration file
     with open(config_file, "r") as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
 
+    # Size parameters
     large_cnv_size = int(config['large_cnv_size'])
-    gnomad_col = config['gnomad_col']
-    alt_gnomad_col = config['alt_gnomad_col']
+    intermediate_cnv_size = int(config['intermediate_cnv_size'])
+    depth_only_size = int(config['depth_only_size'])
+    # Allele frequency
     gnomad_af = float(config['gnomad_AF'])
     parents_af = float(config['parents_AF'])
+    cohort_af = float(config['cohort_AF'])
+    # Overlap parameters
     large_raw_overlap = float(config['large_raw_overlap'])
     small_raw_overlap = float(config['small_raw_overlap'])
-    cohort_af = float(config['cohort_AF'])
-    coverage_cutoff = float(config['coverage_cutoff'])
-    depth_only_size = float(config['depth_only_size'])
     parents_overlap = float(config['parents_overlap'])
+    blacklist_overlap = float(config['blacklist_overlap'])
+    nearby_insertion = int(config['nearby_insertion'])
+    # SV quality (parents)
+    coverage_cutoff = int(config['coverage_cutoff'])
     gq_min = float(config['gq_min'])
+    # Other
+    gnomad_col = config['gnomad_col']
+    alt_gnomad_col = config['alt_gnomad_col']
+    #af_column_name = config['af_column_name']        # Not sure yet how to deal with that one given that it is optional.
 
-    # Read files
+    
+    # Read in files
     verbose_print('Reading Input Files', verbose)
     bed = pd.read_csv(bed_file, sep='\t').replace(np.nan, '', regex=True)
     bed = bed[(bed['samples'] != "")]
