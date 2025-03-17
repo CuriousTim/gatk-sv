@@ -21,10 +21,10 @@ workflow DeNovoSV {
 
         # Core input files
         File ped_input
-        File? family_ids_txt                   # Kept it for the moment in case we wantto do test runs on family subsets
+        File? family_ids_txt               # Kept to run tests on family subsets
         File vcf_file
-        File vcf_file_index                    # Used to be optional; reason to make it mandatory?
-        File genomic_disorder_input            # Remove if/when we remove the GetGenomicDisorders task? Possibly keep in case we want to use the file for filtering within the python script.
+        File vcf_file_index                    
+        File? genomic_disorder_input       # Kept in case we want to use the file for filtering within the python script.
         File exclude_regions
 
         # Running parameters
