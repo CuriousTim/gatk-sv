@@ -541,7 +541,7 @@ def main():
     verbose_print('Large CNVs check', verbose)
     start = time.time()
     # 1. Strip out if same CN in parents and proband if not in chrX
-    remove_large_cnv = bed_child.loc[~(((bed_child['SVLEN'] <= 5000) | ((bed_child['RD_CN'] != bed_child['maternal_rdcn']) & (bed_child['RD_CN'] != bed_child['paternal_rdcn']))) | (bed_child['chrom'] == 'chrX'))]
+    remove_large_cnv = bed_child.loc[~(((bed_child['SVLEN'] < intermediate_cnv_size) | ((bed_child['RD_CN'] != bed_child['maternal_rdcn']) & (bed_child['RD_CN'] != bed_child['paternal_rdcn']))) | (bed_child['chrom'] == 'chrX'))]
     bed_child.loc[bed_child['name_famid'].isin(remove_large_cnv) & bed_child['is_de_novo'], 'filter_flag'] = 'same_cn_as_parents'
     bed_child.loc[bed_child['name_famid'].isin(remove_large_cnv) & bed_child['is_de_novo'], 'is_de_novo'] = False
     end = time.time()
@@ -637,8 +637,8 @@ def main():
     verbose_print('Checking large cnvs in raw files', verbose)
     start = time.time()
 
-    large_bed_filt_cnv_depth = bed_child_de_novo[(bed_child_de_novo['is_large_cnv']) & (bed_child_de_novo['SVLEN'] >= 5000)]
-    large_bed_filt_cnv_other = bed_child_de_novo[(bed_child_de_novo['is_large_cnv']) & (bed_child_de_novo['SVLEN'] < 5000)]
+    large_bed_filt_cnv_depth = bed_child_de_novo[(bed_child_de_novo['is_large_cnv']) & (bed_child_de_novo['SVLEN'] >= intermediate_cnv_size)]
+    large_bed_filt_cnv_other = bed_child_de_novo[(bed_child_de_novo['is_large_cnv']) & (bed_child_de_novo['SVLEN'] < intermediate_cnv_size)]
 
     if len(large_bed_filt_cnv_other.index) > 0:
         verbose_print('Checking if intermediate cnv in proband is in raw files', verbose)
