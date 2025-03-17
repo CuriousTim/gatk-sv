@@ -269,7 +269,7 @@ def get_cnv_intersection_other(bed, raw, overlap):
 def get_insertion_intersection(bed, raw):
     overlap = bed.closest(raw).to_dataframe(disable_auto_names = True, header = None)
     if len(overlap) != 0:
-        overlap['is_close'] = abs(overlap[8] - overlap[1]) < 100
+        overlap['is_close'] = abs(overlap[8] - overlap[1]) < nearby_insertion
         if sum(bool(x) for x in overlap['is_close']) > 0:
             names_overlap = overlap[(overlap['is_close'])][6].to_list()
         else:
