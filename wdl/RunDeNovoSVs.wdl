@@ -1,7 +1,6 @@
 version 1.0
     
 import "Structs.wdl"
-import "ReformatRawFiles.wdl" as raw
 import "TasksMakeCohortVcf.wdl" as miniTasks
 import "DeNovoSVsScatter.wdl" as runDeNovo
 import "Utils.wdl" as util
@@ -57,10 +56,10 @@ workflow DeNovoSV {
     RuntimeAttr? runtime_override_subset_manifests
     RuntimeAttr? runtime_override_subset_vcf
     RuntimeAttr? runtime_attr_clean_ped
-    RuntimeAttr? runtime_attr_raw_vcf_to_bed
-    RuntimeAttr? runtime_attr_raw_merge_bed
-    RuntimeAttr? runtime_attr_raw_divide_by_chrom
-    RuntimeAttr? runtime_attr_raw_reformat_bed
+    RuntimeAttr? runtime_override_clustered_vcf_to_bed
+    RuntimeAttr? runtime_override_merge_clustered_bed
+    RuntimeAttr? runtime_override_contig_from_bed
+    RuntimeAttr? runtime_override_reformat_bed
     RuntimeAttr? runtime_attr_gd
     RuntimeAttr? runtime_attr_subset_vcf
     RuntimeAttr? runtime_attr_shard_vcf
@@ -126,35 +125,77 @@ workflow DeNovoSV {
       runtime_attr_override = runtime_attr_clean_ped
   }
 
-  # Splits raw files into probands and parents and reformats to have chrom_svtype_sample as the first column for probands and chrom_svtype_famid as the first column for parents
-  call raw.ReformatRawFiles as ReformatRawFiles {
-    input:
-      contigs = contigs,
-      raw_files_list = select_first([SubsetManifestsByFamilies.subset_pesr_manifest, MakeManifests.pesr_manifest]),
-      ped_input = CleanPed.cleaned_ped,
-      depth = false,
-      variant_interpretation_docker = variant_interpretation_docker,
-      sv_base_mini_docker = sv_base_mini_docker,
-      runtime_attr_vcf_to_bed = runtime_attr_raw_vcf_to_bed,
-      runtime_attr_merge_bed = runtime_attr_raw_merge_bed,
-      runtime_attr_divide_by_chrom = runtime_attr_raw_divide_by_chrom,
-      runtime_attr_reformat_bed = runtime_attr_raw_reformat_bed
+  Array[String] all_pesr_vcfs = transpose(read_tsv(select_first([SubsetManifestsByFamilies.subset_pesr_manifest, MakeManifests.pesr_manifest])))
+  Array[String] all_depth_vcfs = transpose(read_tsv(select_first([SubsetManifestsByFamilies.subset_depth_manifest, MakeManifests.depth_manifest])))
+  scatter (i in range(clustered_pesr_vcfs)) {
+    call util.VcfToBed as PesrVcfToBed {
+      input:
+        vcf = all_pesr_vcfs[i],
+        sv_pipeline_docker = sv_pipeline_docker,
+        runtime_attr_override = runtime_override_clustered_vcf_to_bed
+    }
+
+    call util.VcfToBed as DepthVcfToBed {
+      input:
+        vcf = all_depth_vcfs[i],
+        sv_pipeline_docker = sv_pipeline_docker,
+        runtime_attr_override = runtime_override_clustered_vcf_to_bed
+    }
   }
 
-    # Splits raw files into probands and parents and reformats to have chrom_svtype_sample as the first column for probands and chrom_svtype_famid as the first column for parents
-  call raw.ReformatRawFiles as ReformatDepthRawFiles {
+  call TasksMakeCohortVcf.CatUncompressedFiles as MergePesrBed {
     input:
-      contigs = contigs,
-      raw_files_list = select_first([SubsetManifestsByFamilies.subset_depth_manifest, MakeManifests.depth_manifest]),
-      ped_input = CleanPed.cleaned_ped,
-      depth = true,
-      variant_interpretation_docker = variant_interpretation_docker,
+      shards = PesrVcfToBed.bed,
       sv_base_mini_docker = sv_base_mini_docker,
-      runtime_attr_vcf_to_bed = runtime_attr_raw_vcf_to_bed,
-      runtime_attr_merge_bed = runtime_attr_raw_merge_bed,
-      runtime_attr_divide_by_chrom = runtime_attr_raw_divide_by_chrom,
-      runtime_attr_reformat_bed = runtime_attr_raw_reformat_bed
+      runtime_attr_override = runtime_override_merge_bed
   }
+
+  call TasksMakeCohortVcf.CatUncompressedFiles as MergeDepthBed {
+    input:
+      shards = DepthVcfToBed.bed,
+      sv_base_mini_docker = sv_base_mini_docker,
+      runtime_attr_override = runtime_override_merge_clustered_bed 
+  }
+
+  scatter (contig in contigs) {
+    call GetContigFromBed as GetContigFromPesrBed {
+      input:
+        pesr_bed = MergePesrBed,
+        contig = contig,
+        sv_base_mini_docker = sv_base_mini_docker,
+        runtime_attr_override = runtime_override_contig_from_bed
+    }
+
+    call GetContigFromBed as GetContigFromDepthBed {
+      input:
+        depth_bed = MergeDepthBed,
+        contig = contig,
+        sv_base_mini_docker = sv_base_mini_docker,
+        runtime_attr_override = runtime_override_contig_from_bed
+    }
+
+    call ReformatContigBed as ReformatPesrBed {
+      input:
+        bed = GetContigFromPesrBed.contig_bed,
+        contig = contig,
+        type = "",
+        pedigree = ped_input, 
+        sv_base_mini_docker = sv_base_mini_docker,
+        runtime_attr_override = runtime_override_reformat_bed
+    }
+
+    call ReformatContigBed as ReformatDepthBed {
+      input:
+        bed = GetContigFromDepthBed.contig_bed,
+        contig = contig,
+        type = "depth",
+        pedigree = ped_input,
+        sv_base_mini_docker = sv_base_mini_docker,
+        runtime_attr_override = runtime_override_reformat_bed
+    }
+  }
+
+  # Splits raw files into probands and parents and reformats to have chrom_svtype_sample as the first column for probands and chrom_svtype_famid as the first column for parents
     
   scatter (i in range(length(contigs))) {
     # Generates a list of genomic disorder regions in the vcf input as well as in the depth raw files
@@ -196,10 +237,10 @@ workflow DeNovoSV {
         vcf_files = ScatterVcf.shards,
         disorder_input = GetGenomicDisorders.gd_output_for_denovo,
         chromosome = contigs[i],
-        raw_proband = ReformatRawFiles.reformatted_proband_raw_files[i],
-        raw_parents = ReformatRawFiles.reformatted_parents_raw_files[i],
-        raw_depth_proband = ReformatDepthRawFiles.reformatted_proband_raw_files[i],
-        raw_depth_parents = ReformatDepthRawFiles.reformatted_parents_raw_files[i],
+        raw_proband = ReformatPesrBed.reformatted_proband_bed[i],
+        raw_parents = ReformatPesrBed.reformatted_parents_bed[i],
+        raw_depth_proband = ReformatDepthBed.reformatted_proband_bed[i],
+        raw_depth_parents = ReformatDepthBed.reformatted_parents_bed[i],
         exclude_regions = exclude_regions,
         sample_batches = MakeManifests.sample_manifest,
         batch_bincov_index = select_first([SubsetManifestsByFamilies.subset_bincov_manifest, MakeManifests.bincov_manifest]),
@@ -432,6 +473,138 @@ task SubsetManifestsByFamilies {
     File subset_pesr_manifest = "subset_pesr_manifest.tsv"
     File subset_depth_manifest = "subset_depth_manifest.tsv"
     File subset_bincov_manifest = "subset_bincov_manifest.tsv"
+  }
+}
+
+# Convert a VCF to BED with svtk vcf2bed.
+task VcfToBed {
+  input {
+    File vcf
+    String sv_pipeline_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float input_size = size(vcf, "GB")
+  RuntimeAttr default_attr = object {
+    mem_gb: 2,
+    cpu_cores: 1,
+    disk_gb: ceil(input_size * 1.5) + 16,
+    boot_disk_gb: 10,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_override = select_first([runtime_attr_override, default_attr])
+
+  String output_bed = basename(vcf, ".vcf.gz") + ".bed.gz"
+
+  command <<<
+    set -euo pipefail
+
+    svtk vcf2bed '~{vcf}' --info SVTYPE - \
+      | bgzip -c > '~{output_bed}'
+  >>>
+
+  output {
+    File bed = output_bed
+  }
+}
+
+# Extract a single contig from a BED file.
+task GetContigFromBed {
+  input {
+    File bed
+    String contig
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float input_size = size(bed, "GB")
+  RuntimeAttr default_attr = object {
+    mem_gb: 1,
+    cpu_cores: 1,
+    disk_gb: ceil(input_size * 2) + 16,
+    boot_disk_gb: 10,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_override = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: "${select_first([runtime_override.mem_gb, default_attr.mem_gb])} GB"
+    cpu: select_first([runtime_override.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk ${select_first([runtime_override.disk_gb, default_attr.disk_gb])} HDD"
+    bootDiskSizeGb: select_first([runtime_override.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_override.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_override.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
+  }
+
+  command <<<
+    set -euo pipefail
+    bgzip -cd '~{bed}' \
+      | awk -F'\t' '$1 == "~{contig}"' \
+      | bgzip -c > '~{contig}.bed.gz'
+  >>>
+
+  output {
+    File contig_bed = "${contig}.bed.gz"
+  }
+}
+
+# Reformat a single contig BED file produced by converting the GATK-SV
+# clustered VCF into a BED file with svtk vcf2bed then extracting a
+# single contig. The BED file is split into proband SVs and parental SVs
+# reformatted according to the requirements of the denovo_svs.py script.
+task ReformatContigBed {
+  input {
+    File bed
+    String contig
+    String type
+    File pedigree
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float disk_size = size(bed, "GB") * 2 + size(pedigree, "GB") + 16
+  RuntimeAttr default_attr = object {
+    mem_gb: 4,
+    cpu_cores: 1,
+    disk_gb: ceil(disk_size),
+    boot_disk_gb: 10,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_override = select_first([runtime_attr_override, default_attr])
+
+  String type_str = if type == "" then "" else ".${type}"
+  command <<<
+    # FamID ParentalID
+    awk -F'\t' 'BEGIN{OFS="\t"} /^#/ || $1 ~ /FamID/{next} {print $1,$3; print $1,$4}' '~{pedigree}' \
+      | sort -u > parents.tsv
+    # ChildID
+    awk -F'\t' 'BEGIN{OFS="\t"} /^#/ || $1 ~ /FamID/{next} NR==FNR{a[$2]} NR>FNR && !($2 in a){print $2}' parents.tsv '~{pedigree}' \
+      | sort -u > children.list
+
+    # CHROM start end SVTYPE samples
+    bgzip -cd '~{bed}' \
+      | awk -F'\t' 'BEGIN{OFS="\t"} /^#/{next} {split($6, a, /,/); for(i in a){print $1,$2,$3,$7,a[i]}}' \
+      | awk 'BEGIN{OFS="\t"
+                   out_c="sort -k1,1 -k2,2n | bgzip -c > ~{contig}.proband~{type_str}.reformatted.bed.gz"
+                   out_p="sort -k1,1 -k2,2n | bgzip -c > ~{contig}.parents~{type_str}.reformatted.bed.gz"}
+             FILENAME == ARGV[1]{c[$1]}
+             FILENAME == ARGV[2]{p[$2]=$1}
+             FILENAME == ARGV[3] && ($5 in p){print $1"_"$4"_"p[$5],$2,$3,$4,$5 | out_p}
+             FILENAME == ARGV[3] && ($5 in c}{print $1"_"$4"_"$5,$2,$3,$4,$5 | out_c} children.list parents.tsv -
+  >>>
+
+  # Proband output should be a tab-delimited file with columns:
+  # CHROM_SVTYPE_sample start end SVTYPE sample
+
+  # Parents output is a tab-delimited file with columns:
+  # CHROM_SVTYPE_FamID start end SVTYPE sample
+  output {
+    File reformatted_proband_bed = "${contig}.proband${type_str}.reformatted.sorted.bed.gz"
+    File reformatted_parents_bed = "${contig}.proband${type_str}.reformatted.sorted.bed.gz"
   }
 }
 
