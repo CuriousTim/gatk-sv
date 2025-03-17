@@ -322,7 +322,7 @@ def main():
         config = yaml.load(f, Loader=yaml.FullLoader)
 
     # Size parameters
-    large_cnv_size = int(config['large_cnv_size'])
+    small_cnv_size = int(config['small_cnv_size'])
     intermediate_cnv_size = int(config['intermediate_cnv_size'])
     depth_only_size = int(config['depth_only_size'])
     # Allele frequency
@@ -362,6 +362,7 @@ def main():
     bincov = pd.read_csv(coverage, sep='\t', names=bincov_colnames, header=None).replace(np.nan, '', regex=True)
     sample_batches = pd.read_csv(batches, sep='\t', names=sample_batches_colnames, header=None).replace(np.nan, '', regex=True)
 
+    
     #########################
     # REFORMAT AND ANNOTATE #
     #########################
@@ -403,11 +404,11 @@ def main():
     delta = end - start
     print("Took %f seconds to process" % delta)
 
-    # Flag if small or large CNV based on large_cnv_size cutoff and flag for removal based on size for depth-only calls
+    # Flag if small or large CNV based on small_cnv_size cutoff and flag for removal based on size for depth-only calls
     verbose_print('Flagging calls depending on size', verbose)
     start = time.time()
-    bed['is_large_cnv'] = (bed['SVLEN'] >= large_cnv_size) & ((bed['svtype'] == 'DEL') | (bed['svtype'] == 'DUP'))
-    bed['is_small_cnv'] = (bed['SVLEN'] < large_cnv_size) & ((bed['svtype'] == 'DEL') | (bed['svtype'] == 'DUP'))
+    bed['is_large_cnv'] = (bed['SVLEN'] >= small_cnv_size) & ((bed['svtype'] == 'DEL') | (bed['svtype'] == 'DUP'))
+    bed['is_small_cnv'] = (bed['SVLEN'] < small_cnv_size) & ((bed['svtype'] == 'DEL') | (bed['svtype'] == 'DUP'))
     bed['is_depth_only'] = (bed['EVIDENCE'] == "RD")
     bed['is_depth_only_small_dup'] = (bed['svtype'] == "DUP") & (bed['ALGORITHMS'] == "depth") & (bed['SVLEN'] <= depth_only_size)
     end = time.time()
@@ -574,11 +575,11 @@ def main():
     bed_child['overlap_parent'] = (bed_child['name_famid'].isin(names_overlap))
 
     # Small calls:
-    # If RD,SR and < large_cnv_size, treat RD,SR as SR
+    # If RD,SR and < small_cnv_size, treat RD,SR as SR
     verbose_print('Small CNVs check', verbose)
     start = time.time()
     bed_child['EVIDENCE_FIX'] = bed_child['EVIDENCE']
-    bed_child[(bed_child['SVLEN'] <= large_cnv_size) &
+    bed_child[(bed_child['SVLEN'] <= small_cnv_size) &
               (bed_child['EVIDENCE'] == "RD,SR") &
               ((bed_child['svtype'] == 'DEL') | (bed_child['svtype'] == 'DUP'))]['EVIDENCE_FIX'] = "SR"
 
