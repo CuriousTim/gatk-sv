@@ -47,9 +47,10 @@ workflow DeNovoSV {
 
         # Parameters for denovo_svs.py with default values
         # Size parameters
-        Int small_cnv_size = 1000            # Renamed
-        Int intermediate_cnv_size = 5000     # New! To implement
+        Int small_cnv_size = 1000                # Renamed
+        Int intermediate_cnv_size = 5000         # New
         Int depth_only_size = 10000 
+        Int exclude_parent_cnv_size = 10000000   # New
         # Allele frequency
         Float gnomad_af = 0.01
         Float parents_af = 0.05
@@ -58,8 +59,8 @@ workflow DeNovoSV {
         Float large_raw_overlap = 0.5
         Float small_raw_overlap = 0.5
         Float parents_overlap = 0.5
-        Float blacklist_overlap = 0.5         # New! To implement
-        Int nearby_insertion = 100            # New! To implement
+        Float blacklist_overlap = 0.5            # New
+        Int nearby_insertion = 100               # New
         # SV quality (parents)
         Int coverage_cutoff = 10
         Float gq_min = 0
