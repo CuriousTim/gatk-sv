@@ -325,6 +325,7 @@ def main():
     small_cnv_size = int(config['small_cnv_size'])
     intermediate_cnv_size = int(config['intermediate_cnv_size'])
     depth_only_size = int(config['depth_only_size'])
+    exclude_parent_cnv_size = int(config['exclude_parent_cnv_size'])
     # Allele frequency
     gnomad_af = float(config['gnomad_AF'])
     parents_af = float(config['parents_AF'])
@@ -597,7 +598,7 @@ def main():
     verbose_print('Checking raw files', verbose)
     # Remove depth raw calls > 1MB
     raw_bed_depth_parent['SVLEN'] = raw_bed_depth_parent['end'] - raw_bed_depth_parent['start']
-    raw_bed_ref_depth_parent_subset = raw_bed_depth_parent[(raw_bed_depth_parent['SVLEN'] < 1000000)]
+    raw_bed_ref_depth_parent_subset = raw_bed_depth_parent[(raw_bed_depth_parent['SVLEN'] < exclude_parent_cnv_size)]
 
     # Reformat raw files
     raw_bed_ref_child = convert_to_bedtool(raw_bed_child, sort=False)
