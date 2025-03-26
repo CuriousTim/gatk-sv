@@ -578,6 +578,16 @@ task ReformatContigBed {
   }
   RuntimeAttr runtime_override = select_first([runtime_attr_override, default_attr])
 
+  runtime {
+    memory: "${select_first([runtime_override.mem_gb, default_attr.mem_gb])} GB"
+    cpu: select_first([runtime_override.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk ${select_first([runtime_override.disk_gb, default_attr.disk_gb])} HDD"
+    bootDiskSizeGb: select_first([runtime_override.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_override.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_override.max_retries, default_attr.max_retries])
+    docker: runtime_docker
+  }
+
   String type_str = if type == "" then "" else ".${type}"
   command <<<
     # FamID ParentalID
