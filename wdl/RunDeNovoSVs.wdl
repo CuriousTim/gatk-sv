@@ -740,12 +740,12 @@ task CreatePlots {
   Float input_size = size(select_all([bed_file, ped_file]), "GB")
 
   RuntimeAttr default_attr = object {
-      mem_gb: 16, # 3.75
-      disk_gb: ceil(10 + input_size * 1.2),
-      cpu_cores: 1,
-      preemptible_tries: 2,
-      max_retries: 1,
-      boot_disk_gb: 8
+    mem_gb: 16, # 3.75
+    disk_gb: ceil(10 + input_size * 1.2),
+    cpu_cores: 1,
+    preemptible_tries: 2,
+    max_retries: 1,
+    boot_disk_gb: 8
   }
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
 
@@ -766,9 +766,8 @@ task CreatePlots {
   }
 
   output {
-      File output_plots = "output_plots.pdf"
+    File output_plots = "output_plots.pdf"
   }
-
 }
 
 # Organize the pedigree for DeNovoSVsScatter.
