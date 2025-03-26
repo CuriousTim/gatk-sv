@@ -21,7 +21,7 @@ workflow DeNovoSV {
     File? family_ids
     File vcf
     File vcf_index
-    File? genomic_disorder_input
+    File? genomic_disorder_regions
     File exclude_regions
 
     # Running parameters
@@ -42,28 +42,23 @@ workflow DeNovoSV {
     Array[String]? clustered_scramble_vcf
     Array[String] clustered_depth_vcf
 
-    # Parameters for denovo_svs.py with default values
-    # Size parameters
-    Int small_cnv_size = 1000
-    Int intermediate_cnv_size = 5000
-    Int depth_only_size = 10000
-    Int exclude_parent_cnv_size = 10000000
-    # Allele frequency
-    Float gnomad_af = 0.01
-    Float parents_af = 0.05
-    Float cohort_af = 0.05
-    # Overlap parameters
-    Float large_raw_overlap = 0.5
-    Float small_raw_overlap = 0.5
-    Float parents_overlap = 0.5
-    Float blacklist_overlap = 0.5
-    Int nearby_insertion = 100
-    # SV quality (parents)
-    Int coverage_cutoff = 10
-    Float gq_min = 0
-    # Other
-    String gnomad_col = "gnomAD_V2_AF"
-    String alt_gnomad_col = "gnomad_v2.1_sv_AF"
+    # Parameters for denovo_svs.py
+    Int? small_cnv_size
+    Int? intermediate_cnv_size
+    Int? depth_only_size
+    Int? exclude_parent_cnv_size
+    Float? gnomad_af
+    Float? parents_af
+    Float? cohort_af
+    Float? large_raw_overlap
+    Float? small_raw_overlap
+    Float? parents_overlap
+    Float? blacklist_overlap
+    Int? nearby_insertion
+    Int? coverage_cutoff
+    Float? gq_min
+    String? gnomad_col
+    String? alt_gnomad_col
 
     # Parameters for denovo_outliers.py with default values
     Int denovo_outlier_factor = 3
@@ -246,13 +241,14 @@ workflow DeNovoSV {
     # Runs the de novo calling python script on each shard and outputs a per chromosome list of de novo SVs
     call runDeNovo.DeNovoSVsScatter as GetDeNovo {
       input:
-        ped_input = CleanPed.cleaned_ped,
-        vcf_files = ScatterVcf.shards,
+        pedigree = CleanPed.cleaned_ped,
+        vcfs = ScatterVcf.shards,
         chromosome = contigs[i],
         raw_proband = ReformatPesrBed.reformatted_proband_bed[i],
         raw_parents = ReformatPesrBed.reformatted_parents_bed[i],
         raw_depth_proband = ReformatDepthBed.reformatted_proband_bed[i],
         raw_depth_parents = ReformatDepthBed.reformatted_parents_bed[i],
+        genomic_disorder_regions = genomic_disorder_regions,
         exclude_regions = exclude_regions,
         sample_batches = MakeManifests.sample_manifest,
         batch_bincov_index = select_first([SubsetManifestsByFamilies.subset_bincov_manifest, MakeManifests.bincov_manifest]),
@@ -273,9 +269,9 @@ workflow DeNovoSV {
         gnomad_col = gnomad_col,
         alt_gnomad_col = alt_gnomad_col,
         variant_interpretation_docker = variant_interpretation_docker,
-        runtime_attr_denovo = runtime_override_denovo,
-        runtime_attr_vcf_to_bed = runtime_override_vcf_to_bed,
-        runtime_attr_merge_bed = runtime_override_denovo_merge_bed
+        runtime_override_denovo = runtime_override_denovo,
+        runtime_override_vcf_to_bed = runtime_override_vcf_to_bed,
+        runtime_override_merge_bed = runtime_override_denovo_merge_bed
     }
   }
 
