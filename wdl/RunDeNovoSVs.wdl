@@ -197,8 +197,6 @@ workflow DeNovoSV {
     }
   }
 
-  # Splits raw files into probands and parents and reformats to have chrom_svtype_sample as the first column for probands and chrom_svtype_famid as the first column for parents
-    
   scatter (i in range(length(contigs))) {
     # Generates a list of genomic disorder regions in the vcf input as well as in the depth raw files
     call GetGenomicDisorders {
