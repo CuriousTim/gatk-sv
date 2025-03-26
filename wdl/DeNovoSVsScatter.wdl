@@ -8,7 +8,6 @@ workflow DeNovoSVsScatter {
     input {
         File ped_input
         Array[File] vcf_files
-        File disorder_input
         String chromosome
         File raw_proband
         File raw_parents
@@ -56,7 +55,6 @@ workflow DeNovoSVsScatter {
                 bed_input=VcfToBed.bed_output,
                 ped_input=ped_input,
                 vcf_input=shard,
-                disorder_input=disorder_input,
                 chromosome=chromosome,
                 raw_proband=raw_proband,
                 raw_parents=raw_parents,
@@ -112,7 +110,6 @@ task RunDeNovo {
         File bed_input
         File ped_input
         File vcf_input
-        File disorder_input
         String chromosome
         File raw_proband
         File raw_parents
@@ -186,7 +183,6 @@ task RunDeNovo {
             --bed ~{bed_input} \
             --ped ~{ped_input} \
             --vcf ~{basename}.noheader.vcf.gz \
-            --disorder ~{disorder_input} \
             --out ~{basename}.annotation.bed \
             --out_de_novo ~{basename}.denovo.bed \
             --raw_proband ~{raw_proband} \

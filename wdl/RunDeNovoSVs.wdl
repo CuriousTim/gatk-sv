@@ -1,56 +1,80 @@
 version 1.0
 
+###########################
+# IMPORT TOOLS
+###########################
+
 import "Structs.wdl"
 import "TasksMakeCohortVcf.wdl" as miniTasks
 import "DeNovoSVsScatter.wdl" as runDeNovo
 import "Utils.wdl" as util
 
+###########################
+# MAIN WORKFLOW DEFINITION
+###########################
+
 workflow DeNovoSV {
   input {
+    # Core input files
     File pedigree
+    # One family ID per line to call de novo in subset of families
+    File? family_ids
     File vcf
     File vcf_index
+    File? genomic_disorder_input
+    File exclude_regions
+
+    # Running parameters
+    String output_prefix
+    Int records_per_shard
     Array[String] contigs = ["chr1", "chr2", "chr3", "chr4", "chr5", "chr6",
       "chr7", "chr8", "chr9", "chr10", "chr11", "chr12", "chr13", "chr14", "chr15",
       "chr16", "chr17", "chr18", "chr19", "chr20", "chr21", "chr22", "chrX"]
-    File genomic_disorder_input
 
+    # Raw data
     Array[String] batch_name_list            # batch IDs
     Array[File] batch_sample_lists           # samples in each batch (filtered set)
     Array[String] batch_bincov_matrix
     Array[String] batch_bincov_matrix_index
-    # VCFs from ClusterBatch
     Array[String]? clustered_manta_vcf
     Array[String]? clustered_melt_vcf
     Array[String]? clustered_wham_vcf
     Array[String]? clustered_scramble_vcf
     Array[String] clustered_depth_vcf
 
-    File exclude_regions
-    Int records_per_shard
-    String output_prefix
-    # One family ID per line to call de novo
-    File? family_ids
-    String variant_interpretation_docker
-    String sv_base_mini_docker
-    String linux_docker
-    String sv_pipeline_docker
-    String python_docker
+    # Parameters for denovo_svs.py with default values
+    # Size parameters
+    Int small_cnv_size = 1000
+    Int intermediate_cnv_size = 5000
+    Int depth_only_size = 10000
+    Int exclude_parent_cnv_size = 10000000
+    # Allele frequency
+    Float gnomad_af = 0.01
+    Float parents_af = 0.05
+    Float cohort_af = 0.05
+    # Overlap parameters
+    Float large_raw_overlap = 0.5
+    Float small_raw_overlap = 0.5
+    Float parents_overlap = 0.5
+    Float blacklist_overlap = 0.5
+    Int nearby_insertion = 100
+    # SV quality (parents)
+    Int coverage_cutoff = 10
+    Float gq_min = 0
+    # Other
+    String gnomad_col = "gnomAD_V2_AF"
+    String alt_gnomad_col = "gnomad_v2.1_sv_AF"
 
-    # Parameters for deNovoSVs.py
-    Int? large_cnv_size
-    String? gnomad_col
-    String? alt_gnomad_col
-    Float? gnomad_af
-    Float? parents_af
-    Float? large_raw_overlap
-    Float? small_raw_overlap
-    Float? cohort_af
-    Int? coverage_cutoff
-    Int? depth_only_size
-    Float? parents_overlap
-    Float? gq_min
-    String? af_column_name
+    # Parameters for denovo_outliers.py with default values
+    Int denovo_outlier_factor = 3
+
+    # Dockers
+    String linux_docker
+    String python_docker
+    String sv_base_mini_docker
+    String sv_pipeline_docker
+    String variant_interpretation_docker
+
 
     RuntimeAttr? runtime_override_make_manifests
     RuntimeAttr? runtime_override_subset_manifests
@@ -70,6 +94,7 @@ workflow DeNovoSV {
     RuntimeAttr? runtime_override_call_outliers
   }
 
+  # Create text files with the paths of the raw data used by the workflow
   call MakeManifests {
     input:
       batch_name_list = batch_name_list,
@@ -85,7 +110,7 @@ workflow DeNovoSV {
       runtime_attr_override = runtime_override_make_manifests
   }
 
-  # If this file is given, subset all other input files to only include the necessary batches.
+  # If family_ids file is given, subset all other input files to only include the necessary batches.
   if (defined(family_ids)) {
     call SubsetManifestsByFamilies {
       input:
@@ -195,6 +220,8 @@ workflow DeNovoSV {
     }
   }
 
+  # Scatter the following tasks across chromosomes: SubsetVcf, miniTasks.ScatterVCf,
+  # and runDeNovo.DeNovoSVsScatter.
   scatter (i in range(length(contigs))) {
     # Splits vcf by chromosome
     call SubsetVcf {
@@ -229,20 +256,23 @@ workflow DeNovoSV {
         exclude_regions = exclude_regions,
         sample_batches = MakeManifests.sample_manifest,
         batch_bincov_index = select_first([SubsetManifestsByFamilies.subset_bincov_manifest, MakeManifests.bincov_manifest]),
-        large_cnv_size = large_cnv_size,
-        gnomad_col = gnomad_col,
-        alt_gnomad_col = alt_gnomad_col,
+        small_cnv_size = small_cnv_size,
+        intermediate_cnv_size = intermediate_cnv_size,
+        depth_only_size = depth_only_size,
+        exclude_parent_cnv_size = exclude_parent_cnv_size,
         gnomad_af = gnomad_af,
         parents_af = parents_af,
+        cohort_af = cohort_af,
         large_raw_overlap = large_raw_overlap,
         small_raw_overlap = small_raw_overlap,
-        cohort_af = cohort_af,
-        coverage_cutoff = coverage_cutoff,
-        depth_only_size = depth_only_size,
         parents_overlap = parents_overlap,
+        blacklist_overlap = blacklist_overlap,
+        nearby_insertion = nearby_insertion,
+        coverage_cutoff = coverage_cutoff,
         gq_min = gq_min,
-        af_column_name = af_column_name,
-        variant_interpretation_docker=variant_interpretation_docker,
+        gnomad_col = gnomad_col,
+        alt_gnomad_col = alt_gnomad_col,
+        variant_interpretation_docker = variant_interpretation_docker,
         runtime_attr_denovo = runtime_override_denovo,
         runtime_attr_vcf_to_bed = runtime_override_vcf_to_bed,
         runtime_attr_merge_bed = runtime_override_denovo_merge_bed
@@ -283,6 +313,10 @@ workflow DeNovoSV {
     Array [File] denovo_output_annotated = GetDeNovo.per_chromosome_annotation_output_file
   }
 }
+
+###########################
+# TASK DEFINITIONS
+###########################
 
 # Convert the input arrays into files that are needed by other tasks in the workflow.
 task MakeManifests {
@@ -560,6 +594,7 @@ task ReformatContigBed {
   }
 }
 
+# Extract a single contig from a VCF.
 task SubsetVcf {
   input {
     File vcf
@@ -602,6 +637,7 @@ task SubsetVcf {
   }
 }
 
+# Merge the BED files output by DeNovoSVsScatter.
 task MergeDenovoBedFiles {
   input {
     Array[File] bed_files
@@ -645,6 +681,7 @@ task MergeDenovoBedFiles {
 
 }
 
+# Check for outliers in the de novo callset.
 task CallOutliers {
   input {
     File bed_file
@@ -691,6 +728,7 @@ task CallOutliers {
   }
 }
 
+# Make plots for the de novo calls.
 task CreatePlots {
   input {
     File bed_file
@@ -733,6 +771,7 @@ task CreatePlots {
 
 }
 
+# Organize the pedigree for DeNovoSVsScatter.
 task CleanPed {
   input {
     File ped_file
