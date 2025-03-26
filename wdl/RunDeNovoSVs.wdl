@@ -125,19 +125,21 @@ workflow DeNovoSV {
       runtime_attr_override = runtime_attr_clean_ped
   }
 
-  Array[String] all_pesr_vcfs = transpose(read_tsv(select_first([SubsetManifestsByFamilies.subset_pesr_manifest, MakeManifests.pesr_manifest])))
-  Array[String] all_depth_vcfs = transpose(read_tsv(select_first([SubsetManifestsByFamilies.subset_depth_manifest, MakeManifests.depth_manifest])))
-  scatter (i in range(clustered_pesr_vcfs)) {
+  Array[String] all_pesr_vcfs = transpose(read_tsv(select_first([SubsetManifestsByFamilies.subset_pesr_manifest, MakeManifests.pesr_manifest])))[1]
+  Array[String] all_depth_vcfs = transpose(read_tsv(select_first([SubsetManifestsByFamilies.subset_depth_manifest, MakeManifests.depth_manifest])))[1]
+  scatter (vcf in all_pesr_vcfs) {
     call util.VcfToBed as PesrVcfToBed {
       input:
-        vcf = all_pesr_vcfs[i],
+        vcf = vcf,
         sv_pipeline_docker = sv_pipeline_docker,
         runtime_attr_override = runtime_override_clustered_vcf_to_bed
     }
+  }
 
+  scatter (vcf in all_depth_vcfs) {
     call util.VcfToBed as DepthVcfToBed {
       input:
-        vcf = all_depth_vcfs[i],
+        vcf = vcf,
         sv_pipeline_docker = sv_pipeline_docker,
         runtime_attr_override = runtime_override_clustered_vcf_to_bed
     }
