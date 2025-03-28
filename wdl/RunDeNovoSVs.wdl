@@ -65,7 +65,6 @@ workflow DeNovoSV {
 
     # Dockers
     String linux_docker
-    String python_docker
     String sv_base_mini_docker
     String sv_pipeline_docker
     String variant_interpretation_docker
