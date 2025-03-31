@@ -231,6 +231,7 @@ workflow DeNovoSV {
     call miniTasks.ScatterVcf as ScatterVcf {
       input:
         vcf = SubsetVcf.vcf_output,
+        vcf_index = SubsetVcf.vcf_index_output,
         prefix = output_prefix,
         records_per_shard = records_per_shard,
         sv_pipeline_docker = sv_pipeline_docker,
@@ -625,10 +626,12 @@ task SubsetVcf {
     set -euxo pipefail
 
     bcftools view '~{vcf}' --regions '~{chromosome}' -O z -o '~{chromosome}.vcf.gz'
+    bcftools index --tbi '~{chromosome}.vcf.gz'
   >>>
 
   output {
     File vcf_output = "${chromosome}.vcf.gz"
+    File vcf_index_output = "${chromosome}.vcf.gz.tbi"
   }
 }
 
