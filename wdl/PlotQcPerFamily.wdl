@@ -28,7 +28,6 @@ workflow PlotQcPerFamily {
     String sv_pipeline_qc_docker
 
     # overrides for local tasks
-    RuntimeAttr? runtime_override_select_trios
     RuntimeAttr? runtime_override_plot_qc_per_family
 
     # overrides for MiniTasks or Utils
@@ -52,30 +51,12 @@ workflow PlotQcPerFamily {
 
   Array[String] contigs = transpose(read_tsv(primary_contigs_fai))[0]
 
-  call SelectTrios {
-    input:
-      max_trios = max_trios,
-      pedigree = ped_file,
-      linux_docker = linux_docker,
-      runtime_attr_override = runtime_override_select_trios
-  }
-
-  scatter (i in range(length(contigs))) {
-    call Utils.SubsetVcfBySamplesList {
-      input:
-        vcf = vcfs[i],
-        list_of_samples = SelectTrios.trio_samples,
-        sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_subset_vcf
-    }
-  }
-
   # Scatter raw variant data collection per chromosome
   scatter (i in range(length(contigs))) {
     # Collect VCF-wide summary stats
     call vcfwideqc.CollectQcVcfWide {
       input:
-        vcfs=[SubsetVcfBySamplesList.vcf_subset[i]],
+        vcfs=vcfs,
         contig=contigs[i],
         sv_per_shard=sv_per_shard,
         bcftools_preprocessing_options=bcftools_preprocessing_options,
@@ -155,54 +136,6 @@ workflow PlotQcPerFamily {
   # Final output
   output {
     File qc_per_family_plots = PlotQcPerFamily.perFamily_plots_tarball
-  }
-}
-
-# Select max_trios random trios
-task SelectTrios {
-  input {
-    Int max_trios
-    File pedigree
-    String linux_docker
-    RuntimeAttr? runtime_attr_override
-  }
-
-  Float input_size = size(pedigree, "GB")
-  RuntimeAttr runtime_default = object {
-    mem_gb: 2.0,
-    disk_gb: ceil(16.0 + input_size),
-    cpu_cores: 1,
-    preemptible_tries: 1,
-    max_retries: 1,
-    boot_disk_gb: 10
-  }
-  RuntimeAttr runtime_override = select_first([runtime_attr_override, runtime_default])
-  runtime {
-    memory: "~{select_first([runtime_override.mem_gb, runtime_default.mem_gb])} GB"
-    disks: "local-disk ~{select_first([runtime_override.disk_gb, runtime_default.disk_gb])} HDD"
-    cpu: select_first([runtime_override.cpu_cores, runtime_default.cpu_cores])
-    preemptible: select_first([runtime_override.preemptible_tries, runtime_default.preemptible_tries])
-    maxRetries: select_first([runtime_override.max_retries, runtime_default.max_retries])
-    docker: linux_docker
-    bootDiskSizeGb: select_first([runtime_override.boot_disk_gb, runtime_default.boot_disk_gb])
-  }
-
-  command <<<
-    set -o errexit
-    set -o nounset
-    set -o pipefail
-
-    grep -v '^#' '~{pedigree}' \
-      | cut -f 1 \
-      | LC_ALL=C sort \
-      | uniq -c \
-      | awk '$1 >= 3{print $2}' \
-      | shuf -n ~{max_trios} - \
-      | awk 'FILENAME == ARGV[1]{a[$1]} FILENAME == ARGV[2] && $0 !~ /^#/ && ($1 in a){print $2}' - '~{pedigree}' > 'trio_samples.list'
-  >>>
-
-  output {
-    File trio_samples = "trio_samples.list"
   }
 }
 
