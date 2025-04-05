@@ -576,7 +576,7 @@ task ReformatContigBed {
              FILENAME == ARGV[1]{c[$1]}
              FILENAME == ARGV[2]{p[$2]=$1}
              FILENAME == ARGV[3] && ($5 in p){print $1"_"$4"_"p[$5],$2,$3,$4,$5 | out_p}
-             FILENAME == ARGV[3] && ($5 in c}{print $1"_"$4"_"$5,$2,$3,$4,$5 | out_c} children.list parents.tsv -
+             FILENAME == ARGV[3] && ($5 in c}{print $1"_"$4"_"$5,$2,$3,$4,$5 | out_c}' children.list parents.tsv -
   >>>
 
   # Proband output should be a tab-delimited file with columns:
