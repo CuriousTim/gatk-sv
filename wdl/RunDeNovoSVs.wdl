@@ -19,8 +19,8 @@ workflow DeNovoSV {
     File pedigree
     # One family ID per line to call de novo in subset of families
     File? family_ids
-    File vcf
-    File vcf_index
+    Array[File] vcfs
+    Array[File] vcf_indicies
     File? genomic_disorder_regions
     File exclude_regions
 
@@ -104,6 +104,32 @@ workflow DeNovoSV {
       runtime_attr_override = runtime_override_make_manifests
   }
 
+  if (length(vcfs) == 1) {
+    scatter (i in range(length(contigs))) {
+      call SubsetVcf {
+        input:
+          vcf = vcfs[0],
+          vcf_index = vcf_indicies[0],
+          contig = contigs[i],
+          sv_base_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_subset_vcf
+      }
+    }
+  }
+
+  if (length(vcfs) > 1) {
+    scatter (i in range(length(vcfs))) {
+      call MatchVcfToContig {
+        input:
+          vcf = vcfs[i],
+          vcf_index = vcf_indicies[i],
+          contigs = contigs,
+          sv_base_mini_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_filter_vcfs_for_contigs
+      }
+    }
+  }
+
   # If family_ids file is given, subset all other input files to only include the necessary batches.
   if (defined(family_ids)) {
     call SubsetManifestsByFamilies {
@@ -118,16 +144,33 @@ workflow DeNovoSV {
         runtime_attr_override = runtime_override_subset_manifests
     }
 
-    call util.SubsetVcfBySamplesList {
-      input:
-        vcf = vcf,
-        vcf_idx = vcf_index,
-        list_of_samples = SubsetManifestsByFamilies.subset_samples,
-        outfile_name = output_prefix,
-        keep_af = true,
-        remove_private_sites = false,
-        sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_subset_vcf
+    if (length(vcfs) == 1) {
+      call util.SubsetVcfBySamplesList as SubsetSingleVcfBySamples {
+        input:
+          vcf = vcfs[0],
+          vcf_idx = vcf_indicies[0],
+          list_of_samples = SubsetManifestsByFamilies.subset_samples,
+          outfile_name = output_prefix,
+          keep_af = true,
+          remove_private_sites = false,
+          sv_base_mini_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_subset_vcf
+      }
+    }
+
+    if (length(vcfs) > 1) {
+      scatter (i in range(length(vcfs))) {
+        call util.SubsetVcfBySamplesList as SubsetMultipleVcfsBySamples {
+          vcf = vcfs[i],
+          vcf_idx = vcf_indicies[i],
+          list_of_samples = SubsetManifestsByFamilies.subset_samples,
+          outfile_name = output_prefix,
+          keep_af = true,
+          remove_private_sites = false,
+          sv_base_mini_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_subset_vcf
+        }
+      }
     }
   }
 
@@ -217,14 +260,16 @@ workflow DeNovoSV {
   # Scatter the following tasks across chromosomes: SubsetVcf, miniTasks.ScatterVCf,
   # and runDeNovo.DeNovoSVsScatter.
   scatter (i in range(length(contigs))) {
-    # Splits vcf by chromosome
-    call SubsetVcf {
-      input:
-        vcf = select_first([SubsetVcfBySamplesList.vcf_subset, vcf]),
-        vcf_index = vcf_index,
-        chromosome = contigs[i],
-        sv_base_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_subset_vcf
+    if (length(vcfs) == 1) {
+      # Splits vcf by chromosome
+      call SubsetVcf {
+        input:
+          vcf = select_first([SubsetVcfBySamplesList.vcf_subset, vcfs[0]]),
+          vcf_index = vcf_indices[0],
+          chromosome = contigs[i],
+          sv_base_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_subset_vcf
+      }
     }
 
     # Shards vcf
@@ -313,6 +358,66 @@ workflow DeNovoSV {
 ###########################
 # TASK DEFINITIONS
 ###########################
+# Find out which contig, among a set, a VCF contains. If the VCF contains more
+# than one contig, the task will error. If the VCF does not contain any of the
+# given contigs, it will not produce an output.
+task MatchVcfToContig {
+  input {
+    File vcf
+    File vcf_index
+    Array[String] contigs
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float input_size = size([vcf, vcf_index], "GB")
+  RuntimeAttr default_attr = object {
+    mem_gb: 1,
+    cpu_cores: 1,
+    disk_gb: ceil(input_size) + 16,
+    boot_disk_gb: 10,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_override = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: "${select_first([runtime_override.mem_gb, default_attr.mem_gb])} GB"
+    cpu: select_first([runtime_override.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk ${select_first([runtime_override.disk_gb, default_attr.disk_gb])} HDD"
+    bootDiskSizeGb: select_first([runtime_override.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_override.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_override.max_retries, default_attr.max_retries])
+    docker: linux_docker
+  }
+
+  command <<<
+    set -o errexit
+    set -o pipefail
+    set -o nounset
+
+    bcftools index --stats '~{vcf}' | cut -f 1 > contigs_in_vcf.list
+    vcf_contig_count="$(wc -l contigs_in_vcf.list | awk '{print $1}')"
+    if (( vcf_contig_count != 1 )); then
+      printf '%s must have exactly 1 contig. Found %d\n' '~{vcf}' "${vcf_contig_count}" >&2
+      exit 1
+    fi
+
+    LC_ALL=C sort -u '~{contigs_in_vcf}' \
+      | awk 'NR==FNR{a=$1} NR>FNR && (a==$1){print a; exit 0}' contigs_in_vcf.list - > contig.list
+
+    matched_contig="$()"
+    if (( $(wc -l contig.list | awk '{print $1}') == 1 )); then
+      con
+    fi
+  >>>
+
+  output {
+    File? matched_vcf = 
+    File? matched_vcf_index =
+    String? matched_contig =
+  }
+}
 
 # Convert the input arrays into files that are needed by other tasks in the workflow.
 task MakeManifests {
@@ -595,7 +700,7 @@ task SubsetVcf {
   input {
     File vcf
     File vcf_index
-    String chromosome
+    String contig
     String sv_base_docker
     RuntimeAttr? runtime_attr_override
   }
@@ -625,13 +730,13 @@ task SubsetVcf {
   command <<<
     set -euxo pipefail
 
-    bcftools view '~{vcf}' --regions '~{chromosome}' -O z -o '~{chromosome}.vcf.gz'
-    bcftools index --tbi '~{chromosome}.vcf.gz'
+    bcftools view '~{vcf}' --regions '~{contig}' -O z -o '~{contig}.vcf.gz'
+    bcftools index --tbi '~{contig}.vcf.gz'
   >>>
 
   output {
-    File vcf_output = "${chromosome}.vcf.gz"
-    File vcf_index_output = "${chromosome}.vcf.gz.tbi"
+    File vcf_output = "${contig}.vcf.gz"
+    File vcf_index_output = "${contig}.vcf.gz.tbi"
   }
 }
 
