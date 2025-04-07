@@ -733,7 +733,7 @@ task GetSampleBatches {
     set -euo pipefail
 
     awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($2 in a){print $1}' \
-      '~{samples}' '~{sample_batch_map}'
+      '~{samples}' '~{sample_batch_map}' \
       | LC_ALL=C sort -u > batches.list
   >>>
 
