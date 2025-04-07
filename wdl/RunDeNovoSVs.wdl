@@ -462,7 +462,8 @@ task MatchVcfToContig {
     set -euo pipefail
 
     bcftools index --stats '~{vcf}' | cut -f 1 > contigs_in_vcf.list
-    wc -l contigs_in_vcf.list | read -r vcf_contigs_count other
+    read -r vcf_contigs_count _ < <(wc -l contigs_in_vcf.list)
+    unset -v other
     if (( vcf_contigs_count != 1 )); then
       printf 'VCF must contain exactly 1 contig. Found %d\n' "${vcf_contigs_count}" >&2
       exit 1
