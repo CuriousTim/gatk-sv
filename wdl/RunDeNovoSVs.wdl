@@ -435,6 +435,9 @@ task MatchVcfToContig {
     Array[String] contigs
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
+
+    # NOT AN INPUT! Only exists to create an optional type for use in outputs.
+    String? null
   }
 
   Float input_size = size([vcf, vcf_index], "GB")
@@ -477,16 +480,22 @@ task MatchVcfToContig {
     # matched_contig.list should contain the matched contig and have a non-zero
     # filesize.
     if [[ ! -s matched_contig.list ]]; then
-      rm matched_contig.list
+      printf '\n' > matched_contig.list
       rm '~{vcf}'
       rm '~{vcf_index}'
     fi
   >>>
 
+  # There doesn't seem to be way in the WDL language to specify an optional
+  # `String` output without this hack of using a fake input for its optional
+  # type. The `read_string` function will always return `String`, not
+  # `String?` because it will error if its argument file does not exist. This
+  # problematic because this task relies on outputting optional values to
+  # indicate that a VCF did not match a contig.
   output {
     File? matched_vcf = vcf
     File? matched_vcf_index = vcf_index
-    String? matched_contig = read_string("matched_contig.list")
+    String? matched_contig = if read_string("matched_contig.list") == "" then null else read_string("matched_contig.list")
   }
 }
 
