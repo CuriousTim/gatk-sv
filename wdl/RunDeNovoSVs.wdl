@@ -193,6 +193,7 @@ workflow DeNovoSV {
       sample_manifest = MakeManifests.sample_manifest,
       bincov_manifest = MakeManifests.bincov_manifest,
       batches = GetSampleBatches.batches,
+      linux_docker = linux_docker,
       runtime_attr_override = runtime_override_subset_manifests
   }
 
