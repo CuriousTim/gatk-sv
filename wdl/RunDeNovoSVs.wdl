@@ -19,6 +19,10 @@ workflow DeNovoSV {
     File pedigree
     # One family ID per line to call de novo in subset of families
     File? family_ids
+
+    # Either a single VCF or an array of VCFs with each one containing a single
+    # contig. In the case of a single VCF, it is expected that all the contigs
+    # in the input contigs are present.
     Array[File] vcfs
     Array[File] vcf_indicies
     File? genomic_disorder_regions
@@ -71,8 +75,13 @@ workflow DeNovoSV {
 
 
     RuntimeAttr? runtime_override_make_manifests
-    RuntimeAttr? runtime_override_subset_manifests
+    RuntimeAttr? runtime_override_subset_vcf_by_contig
+    RuntimeAttr? runtime_override_match_vcf_to_contig
+    RuntimeAttr? runtime_override_subset_ped
     RuntimeAttr? runtime_override_subset_vcf
+    RuntimeAttr? runtime_override_samples_from_vcf
+    RuntimeAttr? runtime_override_get_sample_batches
+    RuntimeAttr? runtime_override_subset_manifests
     RuntimeAttr? runtime_override_clean_ped
     RuntimeAttr? runtime_override_clustered_vcf_to_bed
     RuntimeAttr? runtime_override_merge_clustered_bed
@@ -88,7 +97,6 @@ workflow DeNovoSV {
     RuntimeAttr? runtime_override_call_outliers
   }
 
-  # Create text files with the paths of the raw data used by the workflow
   call MakeManifests {
     input:
       batch_name_list = batch_name_list,
@@ -106,13 +114,13 @@ workflow DeNovoSV {
 
   if (length(vcfs) == 1) {
     scatter (i in range(length(contigs))) {
-      call SubsetVcf {
+      call SubsetVcfByContig {
         input:
           vcf = vcfs[0],
           vcf_index = vcf_indicies[0],
           contig = contigs[i],
-          sv_base_docker = sv_base_mini_docker,
-          runtime_attr_override = runtime_override_subset_vcf
+          sv_base_mini_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_subset_vcf_by_contig
       }
     }
   }
@@ -125,66 +133,78 @@ workflow DeNovoSV {
           vcf_index = vcf_indicies[i],
           contigs = contigs,
           sv_base_mini_docker = sv_base_mini_docker,
-          runtime_attr_override = runtime_override_filter_vcfs_for_contigs
+          runtime_attr_override = runtime_override_match_vcf_to_contig
       }
     }
   }
 
-  # If family_ids file is given, subset all other input files to only include the necessary batches.
+  Array[File] split_vcfs = select_all(select_first([SubsetVcfByContig.subset_vcf, MatchVcfToContig.matched_vcf]))
+  Array[File] split_vcf_indicies = select_all(select_first([SubsetVcfByContig.subset_vcf_index, MatchVcfToContig.matched_vcf_index]))
+  Array[String] kept_contigs = select_all(if defined(MatchVcfToContig.matched_contig) then select_first([MatchVcfToContig.matched_contig]) else contigs)
+
+  # If family_ids file is given, subset the pedigree and VCFs to those families.
   if (defined(family_ids)) {
-    call SubsetManifestsByFamilies {
+    call SubsetPedByFams {
       input:
-        pesr_manifest = MakeManifests.pesr_manifest,
-        depth_manifest = MakeManifests.depth_manifest,
-        sample_manifest = MakeManifests.sample_manifest,
-        bincov_manifest = MakeManifests.bincov_manifest,
-        family_ids = select_first([family_ids]),
-        pedigree = pedigree,
+        ped = pedigree,
+        fams = select_first([family_ids]),
         linux_docker = linux_docker,
-        runtime_attr_override = runtime_override_subset_manifests
+        runtime_attr_override = runtime_override_subset_ped
     }
 
-    if (length(vcfs) == 1) {
-      call util.SubsetVcfBySamplesList as SubsetSingleVcfBySamples {
+    scatter (i in range(length(split_vcfs))) {
+      call util.SubsetVcfBySamplesList as SubsetVcfWithPed {
         input:
-          vcf = vcfs[0],
-          vcf_idx = vcf_indicies[0],
-          list_of_samples = SubsetManifestsByFamilies.subset_samples,
-          outfile_name = output_prefix,
-          keep_af = true,
-          remove_private_sites = false,
+          vcf = split_vcfs[i],
+          vcf_idx = split_vcf_indicies[i],
+          list_of_samples = SubsetPedByFams.samples,
+          outfile_name = "${kept_contigs[i]}-subset.vcf.gz",
           sv_base_mini_docker = sv_base_mini_docker,
           runtime_attr_override = runtime_override_subset_vcf
       }
     }
+  }
 
-    if (length(vcfs) > 1) {
-      scatter (i in range(length(vcfs))) {
-        call util.SubsetVcfBySamplesList as SubsetMultipleVcfsBySamples {
-          vcf = vcfs[i],
-          vcf_idx = vcf_indicies[i],
-          list_of_samples = SubsetManifestsByFamilies.subset_samples,
-          outfile_name = output_prefix,
-          keep_af = true,
-          remove_private_sites = false,
-          sv_base_mini_docker = sv_base_mini_docker,
-          runtime_attr_override = runtime_override_subset_vcf
-        }
-      }
+  File final_ped = select_first([SubsetPedByFams.subset_ped, pedigree])
+  Array[File] final_vcfs = select_first([SubsetVcfWithPed.vcf_subset, split_vcfs])
+  Array[File] final_vcf_indicies = select_first([SubsetVcfWithPed.vcf_subset_index, split_vcf_indicies])
+
+  scatter (i in range(length(final_vcfs))) {
+    call util.GetSampleIdsFromVcf {
+      input:
+        vcf = final_vcfs[i],
+        sv_base_mini_docker = sv_base_mini_docker,
+        runtime_attr_override = runtime_override_samples_from_vcf
     }
+  }
+
+  call GetSampleBatches {
+    input:
+      samples = GetSampleIdsFromVcf.out_file,
+      sample_batch_map = MakeManifests.sample_manifest,
+      runtime_attr_override = runtime_override_get_sample_batches
+  }
+
+  call SubsetManifestsByBatches {
+    input:
+      pesr_manifest = MakeManifests.pesr_manifest,
+      depth_manifest = MakeManifests.depth_manifest,
+      sample_manifest = MakeManifests.sample_manifest,
+      bincov_manifest = MakeManifests.bincov_manifest,
+      batches = GetSampleBatches.batches,
+      runtime_attr_override = runtime_override_subset_manifests
   }
 
   # Makes a ped file of singletons, duos, and trios for input into the de novo script (only including families of interest)
   call CleanPed {
     input:
-      ped_file = pedigree,
-      vcf_input = select_first([SubsetVcfBySamplesList.vcf_subset, vcf]),
+      ped_file = final_ped,
       variant_interpretation_docker = variant_interpretation_docker,
       runtime_attr_override = runtime_override_clean_ped
   }
 
-  Array[String] all_pesr_vcfs = transpose(read_tsv(select_first([SubsetManifestsByFamilies.subset_pesr_manifest, MakeManifests.pesr_manifest])))[1]
-  Array[String] all_depth_vcfs = transpose(read_tsv(select_first([SubsetManifestsByFamilies.subset_depth_manifest, MakeManifests.depth_manifest])))[1]
+  Array[String] all_pesr_vcfs = transpose(read_tsv(SubsetManifestsByBatches.subset_pesr_manifest))[1]
+  Array[String] all_depth_vcfs = transpose(read_tsv(SubsetManifestsByBatches.subset_depth_manifest))[1]
   scatter (vcf in all_pesr_vcfs) {
     call util.VcfToBed as PesrVcfToBed {
       input:
@@ -219,7 +239,7 @@ workflow DeNovoSV {
       runtime_attr_override = runtime_override_merge_clustered_bed
   }
 
-  scatter (contig in contigs) {
+  scatter (contig in kept_contigs) {
     call GetContigFromBed as GetContigFromPesrBed {
       input:
         bed = MergePesrBed.outfile,
@@ -257,26 +277,14 @@ workflow DeNovoSV {
     }
   }
 
-  # Scatter the following tasks across chromosomes: SubsetVcf, miniTasks.ScatterVCf,
+  # Scatter the following tasks across chromosomes: miniTasks.ScatterVCf,
   # and runDeNovo.DeNovoSVsScatter.
-  scatter (i in range(length(contigs))) {
-    if (length(vcfs) == 1) {
-      # Splits vcf by chromosome
-      call SubsetVcf {
-        input:
-          vcf = select_first([SubsetVcfBySamplesList.vcf_subset, vcfs[0]]),
-          vcf_index = vcf_indices[0],
-          chromosome = contigs[i],
-          sv_base_docker = sv_base_mini_docker,
-          runtime_attr_override = runtime_override_subset_vcf
-      }
-    }
-
+  scatter (i in range(length(split_vcfs))) {
     # Shards vcf
     call miniTasks.ScatterVcf as ScatterVcf {
       input:
-        vcf = SubsetVcf.vcf_output,
-        vcf_index = SubsetVcf.vcf_index_output,
+        vcf = split_vcfs[i],
+        vcf_index = split_vcf_indicies[i],
         prefix = output_prefix,
         records_per_shard = records_per_shard,
         sv_pipeline_docker = sv_pipeline_docker,
@@ -288,15 +296,15 @@ workflow DeNovoSV {
       input:
         pedigree = CleanPed.cleaned_ped,
         vcfs = ScatterVcf.shards,
-        chromosome = contigs[i],
+        chromosome = kept_contigs[i],
         raw_proband = ReformatPesrBed.reformatted_proband_bed[i],
         raw_parents = ReformatPesrBed.reformatted_parents_bed[i],
         raw_depth_proband = ReformatDepthBed.reformatted_proband_bed[i],
         raw_depth_parents = ReformatDepthBed.reformatted_parents_bed[i],
         genomic_disorder_regions = genomic_disorder_regions,
         exclude_regions = exclude_regions,
-        sample_batches = MakeManifests.sample_manifest,
-        batch_bincov_index = select_first([SubsetManifestsByFamilies.subset_bincov_manifest, MakeManifests.bincov_manifest]),
+        sample_batches = SubsetManifestsByBatches.subset_sample_manifest,
+        batch_bincov_index = SubsetManifestsByBatches.subset_bincov_manifest,
         small_cnv_size = small_cnv_size,
         intermediate_cnv_size = intermediate_cnv_size,
         depth_only_size = depth_only_size,
@@ -345,7 +353,6 @@ workflow DeNovoSV {
       runtime_attr_override = runtime_override_create_plots
   }
 
-
   output {
     File cleaned_ped = CleanPed.cleaned_ped
     File final_denovo_nonOutliers = CallOutliers.final_denovo_nonOutliers_output
@@ -358,6 +365,55 @@ workflow DeNovoSV {
 ###########################
 # TASK DEFINITIONS
 ###########################
+
+# Retrieve a single contig from a VCF.
+task SubsetVcfByContig {
+  input {
+    File vcf
+    File vcf_index
+    String contig
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float input_size = size([vcf, vcf_index], "GB")
+  RuntimeAttr default_attr = object {
+    mem_gb: 1,
+    cpu_cores: 1,
+    disk_gb: ceil(input_size * 1.1) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
+  }
+
+  String contig_vcf = "${contig}.vcf.gz"
+  String contig_vcf_index = "${contig}.vcf.gz.tbi"
+
+  command <<<
+    set -euo pipefail
+
+    bcftools view --regions '~{contig}' --output-type z --output '~{contig_vcf}' \
+      '~{vcf}'
+    bcftools index --tbi '~{contig_vcf}'
+  >>>
+
+  output {
+    File subset_vcf = contig_vcf
+    File subset_vcf_index = contig_vcf_index  
+  } 
+}
+
 # Find out which contig, among a set, a VCF contains. If the VCF contains more
 # than one contig, the task will error. If the VCF does not contain any of the
 # given contigs, it will not produce an output.
@@ -375,47 +431,50 @@ task MatchVcfToContig {
     mem_gb: 1,
     cpu_cores: 1,
     disk_gb: ceil(input_size) + 16,
-    boot_disk_gb: 10,
+    boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
   }
-  RuntimeAttr runtime_override = select_first([runtime_attr_override, default_attr])
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
 
   runtime {
-    memory: "${select_first([runtime_override.mem_gb, default_attr.mem_gb])} GB"
-    cpu: select_first([runtime_override.cpu_cores, default_attr.cpu_cores])
-    disks: "local-disk ${select_first([runtime_override.disk_gb, default_attr.disk_gb])} HDD"
-    bootDiskSizeGb: select_first([runtime_override.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_override.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_override.max_retries, default_attr.max_retries])
-    docker: linux_docker
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb])+ " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
   }
 
   command <<<
-    set -o errexit
-    set -o pipefail
-    set -o nounset
+    set -euo pipefail
 
     bcftools index --stats '~{vcf}' | cut -f 1 > contigs_in_vcf.list
-    vcf_contig_count="$(wc -l contigs_in_vcf.list | awk '{print $1}')"
-    if (( vcf_contig_count != 1 )); then
-      printf '%s must have exactly 1 contig. Found %d\n' '~{vcf}' "${vcf_contig_count}" >&2
+    wc -l contigs_in_vcf.list | read -r vcf_contigs_count other
+    if (( vcf_contigs_count != 1 )); then
+      printf 'VCF must contain exactly 1 contig. Found %d\n' "${vcf_contigs_count}" >&2
       exit 1
     fi
 
-    LC_ALL=C sort -u '~{contigs_in_vcf}' \
-      | awk 'NR==FNR{a=$1} NR>FNR && (a==$1){print a; exit 0}' contigs_in_vcf.list - > contig.list
+    awk 'NR==FNR{a=$1} NR>FNR && (a==$1){print a; exit 0}' \
+      contigs_in_vcf.list \
+      '~{write_lines(contigs)}' > matched_contig.list
 
-    matched_contig="$()"
-    if (( $(wc -l contig.list | awk '{print $1}') == 1 )); then
-      con
+    # If the contig in the VCF matched one of the input contigs, then
+    # matched_contig.list should contain the matched contig and have a non-zero
+    # filesize.
+    if [[ ! -s matched_contig.list ]]; then
+      rm matched_contig.list
+      rm '~{vcf}'
+      rm '~{vcf_index}'
     fi
   >>>
 
   output {
-    File? matched_vcf = 
-    File? matched_vcf_index =
-    String? matched_contig =
+    File? matched_vcf = vcf
+    File? matched_vcf_index = vcf_index
+    String? matched_contig = read_string("matched_contig.list")
   }
 }
 
@@ -444,11 +503,11 @@ task MakeManifests {
     mem_gb: 1,
     cpu_cores: 1,
     disk_gb: ceil(input_size) + 16,
-    boot_disk_gb: 10,
+    boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
   }
-  RuntimeAttr runtime_override = select_first([runtime_attr_override, default_attr])
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
 
   Array[String] manta_vcfs = select_first([clustered_manta_vcf, []])
   Array[String] melt_vcfs = select_first([clustered_melt_vcf, []])
@@ -456,12 +515,12 @@ task MakeManifests {
   Array[String] scramble_vcfs = select_first([clustered_scramble_vcf, []])
 
   runtime {
-    memory: "${select_first([runtime_override.mem_gb, default_attr.mem_gb])} GB"
-    cpu: select_first([runtime_override.cpu_cores, default_attr.cpu_cores])
-    disks: "local-disk ${select_first([runtime_override.disk_gb, default_attr.disk_gb])} HDD"
-    bootDiskSizeGb: select_first([runtime_override.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_override.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_override.max_retries, default_attr.max_retries])
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb])+ " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
     docker: linux_docker
   }
 
@@ -516,30 +575,28 @@ task MakeManifests {
   }
 }
 
-# Subset the PESR, depth, sample, and bincov manifests to batches containing the
-# given families. The subset samples manifest will only contain sample IDs, not
-# batch IDs.
-task SubsetManifestsByFamilies {
+# Subset the PESR, depth, sample, and bincov manifests to the given batches.
+# The subset samples manifest will only contain sample IDs, not batch IDs.
+task SubsetManifestsByBatches {
   input {
     File pesr_manifest
     File depth_manifest
     File sample_manifest
     File bincov_manifest
-    File family_ids
-    File pedigree
+    File batches
     String linux_docker
     RuntimeAttr? runtime_attr_override
   }
 
   Float input_size = size([pesr_manifest, depth_manifest, sample_manifest, bincov_manifest,
-   family_ids, pedigree], "GB")
+   batches], "GB")
 
   RuntimeAttr default_attr = object {
-    mem_gb: 3.75,
+    mem_gb: 1,
     cpu_cores: 1,
-    disk_gb: ceil(input_size) + 10,
+    disk_gb: ceil(input_size) + 16,
     boot_disk_gb: 8,
-    preemptible_tries: 2,
+    preemptible_tries: 3,
     max_retries: 1
   }
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
@@ -555,34 +612,108 @@ task SubsetManifestsByFamilies {
   }
 
   command <<<
-    set -exuo pipefail
+    set -euo pipefail
 
-    awk -F'\t' 'NR==FNR && NF==1{a[$1]} NR>FNR && !/^#/ && ($1 in a){print $2}' \
-      '~{family_ids}' '~{pedigree}' \
-      | sort -u > samples.list
-    if [[ $(wc -l samples.list | awk '{print $1}') -eq 0 ]]; then
-      echo 'No matching family IDs found in pedigree.' >&2
-      exit 1
-    fi
-
-    awk -F'\t' 'NR==FNR && NF==1{a[$1]} NR>FNR && ($2 in a){print $1}' \
-      samples.list '~{sample_manifest}' \
-      | sort -u > batches.list
-    if [[ $(wc -l batches.list | awk '{print $1}') -eq 0 ]]; then
-      echo 'No matching batch IDs found in sample manifest.' >&2
-      exit 1
-    fi
-
-    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a)' batches.list '~{pesr_manifest}' > subset_pesr_manifest.tsv
-    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a)' batches.list '~{depth_manifest}' > subset_depth_manifest.tsv
-    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a)' batches.list '~{bincov_manifest}' > subset_bincov_manifest.tsv
+    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a)' '~{batches}' '~{sample_manifest}' > subset_sample_manifest.tsv
+    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a)' '~{batches}' '~{pesr_manifest}' > subset_pesr_manifest.tsv
+    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a)' '~{batches}' '~{depth_manifest}' > subset_depth_manifest.tsv
+    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a)' '~{batches}' '~{bincov_manifest}' > subset_bincov_manifest.tsv
   >>>
 
   output {
-    File subset_samples = "samples.list"
+    File subset_sample_manifest = "subset_sample_manifest.tsv"
     File subset_pesr_manifest = "subset_pesr_manifest.tsv"
     File subset_depth_manifest = "subset_depth_manifest.tsv"
     File subset_bincov_manifest = "subset_bincov_manifest.tsv"
+  }
+}
+
+# Subset pedigree by family IDs.
+task SubsetPedByFams {
+  input {
+    File ped
+    File fams
+    String linux_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float input_size = size([ped, fams], "GB")
+  RuntimeAttr default_attr = object {
+    mem_gb: 1,
+    cpu_cores: 1,
+    disk_gb: ceil(input_size) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: linux_docker
+  }
+
+  command <<<
+    set -euo pipefail
+
+    # The pedigree format required by the pipeline has a header
+    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && FNR==1{print; next} NR>FNR && ($1 in a)' \
+      '~{fams}' '~{ped}' > subset.ped
+    awk 'FNR>1' | cut -f 2 | LC_ALL=C sort -u > subset_samples.list
+  >>>
+
+  output {
+    File subset_ped = "subset.ped"
+    File samples = "subset_samples.list"
+  }
+}
+
+# Get the batches associated with the given samples.
+task GetSampleBatches {
+  input {
+    Array[File] samples
+    File sample_batch_map
+    String linux_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float input_size = size(samples, "GB") + size(sample_batch_map, "GB")
+  RuntimeAttr default_attr = object {
+    mem_gb: 1,
+    cpu_cores: 1,
+    disk_gb: ceil(input_size) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: linux_docker
+  }
+
+  command <<<
+    set -euo pipefail
+
+    cat '~{write_lines(samples)}' \
+      | xargs -L -- cat \
+      | awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($2 in a){print $1}' \
+      | LC_ALL=C sort -u > batches.list
+  >>>
+
+  output {
+    File batches = "batches.list"
   }
 }
 
@@ -600,19 +731,19 @@ task GetContigFromBed {
     mem_gb: 1,
     cpu_cores: 1,
     disk_gb: ceil(input_size * 2) + 16,
-    boot_disk_gb: 10,
+    boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
   }
-  RuntimeAttr runtime_override = select_first([runtime_attr_override, default_attr])
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
 
   runtime {
-    memory: "${select_first([runtime_override.mem_gb, default_attr.mem_gb])} GB"
-    cpu: select_first([runtime_override.cpu_cores, default_attr.cpu_cores])
-    disks: "local-disk ${select_first([runtime_override.disk_gb, default_attr.disk_gb])} HDD"
-    bootDiskSizeGb: select_first([runtime_override.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_override.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_override.max_retries, default_attr.max_retries])
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb])+ " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
     docker: sv_base_mini_docker
   }
 
@@ -651,15 +782,15 @@ task ReformatContigBed {
     preemptible_tries: 3,
     max_retries: 1,
   }
-  RuntimeAttr runtime_override = select_first([runtime_attr_override, default_attr])
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
 
   runtime {
-    memory: "${select_first([runtime_override.mem_gb, default_attr.mem_gb])} GB"
-    cpu: select_first([runtime_override.cpu_cores, default_attr.cpu_cores])
-    disks: "local-disk ${select_first([runtime_override.disk_gb, default_attr.disk_gb])} HDD"
-    bootDiskSizeGb: select_first([runtime_override.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_override.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_override.max_retries, default_attr.max_retries])
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb])+ " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
     docker: sv_base_mini_docker
   }
 
@@ -692,51 +823,6 @@ task ReformatContigBed {
   output {
     File reformatted_proband_bed = "${contig}.proband${type_str}.reformatted.sorted.bed.gz"
     File reformatted_parents_bed = "${contig}.proband${type_str}.reformatted.sorted.bed.gz"
-  }
-}
-
-# Extract a single contig from a VCF.
-task SubsetVcf {
-  input {
-    File vcf
-    File vcf_index
-    String contig
-    String sv_base_docker
-    RuntimeAttr? runtime_attr_override
-  }
-
-  Float input_size = size(vcf, "GB")
-
-  RuntimeAttr default_attr = object {
-    mem_gb: 3.75,
-    disk_gb: ceil(10 + input_size * 1.5),
-    cpu_cores: 1,
-    preemptible_tries: 2,
-    max_retries: 1,
-    boot_disk_gb: 8
-  }
-  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-  runtime {
-    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
-    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: sv_base_docker
-  }
-
-  command <<<
-    set -euxo pipefail
-
-    bcftools view '~{vcf}' --regions '~{contig}' -O z -o '~{contig}.vcf.gz'
-    bcftools index --tbi '~{contig}.vcf.gz'
-  >>>
-
-  output {
-    File vcf_output = "${contig}.vcf.gz"
-    File vcf_index_output = "${contig}.vcf.gz.tbi"
   }
 }
 
@@ -781,7 +867,6 @@ task MergeDenovoBedFiles {
   output {
     File merged_denovo_output = "denovo.merged.bed.gz"
   }
-
 }
 
 # Check for outliers in the de novo callset.
@@ -877,19 +962,17 @@ task CreatePlots {
 task CleanPed {
   input {
     File ped_file
-    File vcf_input
     String variant_interpretation_docker
     RuntimeAttr? runtime_attr_override
   }
 
   Float ped_size = size(ped_file, "GB")
-  Float vcf_size = size(vcf_input, "GB")
 
   RuntimeAttr default_attr = object {
     mem_gb: 3.75,
-    disk_gb: ceil(10 + vcf_size + ped_size * 1.5),
+    disk_gb: ceil(10 + ped_size * 1.5),
     cpu_cores: 1,
-    preemptible_tries: 2,
+    preemptible_tries: 3,
     max_retries: 1,
     boot_disk_gb: 8
   }
@@ -911,19 +994,9 @@ task CleanPed {
     # TODO: this script should get the name of the output file it generates as an input argument.
     # The output filename is currently hardcoded to be 'clean_ped.txt'.
     Rscript /src/denovo/clean_ped.R ~{ped_file}
-    cut -f2 cleaned_ped.txt | awk 'NR > 1' > all_samples.txt
-    bcftools query -l ~{vcf_input} > samples_to_include_in_ped.txt
-
-    # Note: grep returns a non-success exit code (i.e., other than `0`) when it cannot find the
-    # match in the following scripts. We do not expect it to find a match for every entry.
-    # Hence, to avoid exit with unsuccessful code, we can either drop pipefail from above or use `|| true`.
-
-    grep -w -v -f samples_to_include_in_ped.txt all_samples.txt > excluded_samples.txt || true
-    grep -w -f excluded_samples.txt cleaned_ped.txt | cut -f1 | sort -u > excluded_families.txt || true
-    grep -w -v -f excluded_families.txt cleaned_ped.txt > subset_cleaned_ped.txt || true
   >>>
 
   output {
-    File cleaned_ped = "subset_cleaned_ped.txt"
+    File cleaned_ped = "clean_ped.txt"
   }
 }
