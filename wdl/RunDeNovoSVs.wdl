@@ -290,12 +290,12 @@ workflow DeNovoSV {
 
   # Scatter the following tasks across chromosomes: miniTasks.ScatterVCf,
   # and runDeNovo.DeNovoSVsScatter.
-  scatter (i in range(length(split_vcfs))) {
+  scatter (i in range(length(final_vcfs))) {
     # Shards vcf
     call miniTasks.ScatterVcf as ScatterVcf {
       input:
-        vcf = split_vcfs[i],
-        vcf_index = split_vcf_indicies[i],
+        vcf = final_vcfs[i],
+        vcf_index = final_vcf_indicies[i],
         prefix = output_prefix,
         records_per_shard = records_per_shard,
         sv_pipeline_docker = sv_pipeline_docker,
