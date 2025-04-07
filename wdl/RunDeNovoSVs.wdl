@@ -1005,13 +1005,12 @@ task CleanPed {
     awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && FNR==1{print; next} NR>FNR && ($2 in a)' \
       '~{vcf_samples}' '~{ped_file}' > filtered.ped
 
-    # TODO: this script should get the name of the output file it generates as an input argument.
-    # The output filename is currently hardcoded to be 'clean_ped.txt'.
+    # The output file is hardcoded to "cleaned_ped.txt"
     Rscript /src/denovo/clean_ped.R filtered.ped
   >>>
 
   output {
-    File cleaned_ped = "clean_ped.txt"
+    File cleaned_ped = "cleaned_ped.txt"
   }
 }
 
