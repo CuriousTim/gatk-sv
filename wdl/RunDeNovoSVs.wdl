@@ -82,6 +82,7 @@ workflow DeNovoSV {
     RuntimeAttr? runtime_override_samples_from_vcf
     RuntimeAttr? runtime_override_get_sample_batches
     RuntimeAttr? runtime_override_subset_manifests
+    RuntimeAttr? runtime_override_merge_sample_lists
     RuntimeAttr? runtime_override_clean_ped
     RuntimeAttr? runtime_override_clustered_vcf_to_bed
     RuntimeAttr? runtime_override_merge_clustered_bed
@@ -165,7 +166,7 @@ workflow DeNovoSV {
     }
   }
 
-  File final_ped = select_first([SubsetPedByFams.subset_ped, pedigree])
+  File working_ped = select_first([SubsetPedByFams.subset_ped, pedigree])
   Array[File] final_vcfs = select_first([SubsetVcfWithPed.vcf_subset, split_vcfs])
   Array[File] final_vcf_indicies = select_first([SubsetVcfWithPed.vcf_subset_index, split_vcf_indicies])
 
@@ -178,9 +179,16 @@ workflow DeNovoSV {
     }
   }
 
-  call GetSampleBatches {
+  call MergeSampleLists {
     input:
       samples = GetSampleIdsFromVcf.out_file,
+      linux_docker = linux_docker,
+      runtime_attr_override = runtime_override_merge_sample_lists
+  }
+
+  call GetSampleBatches {
+    input:
+      samples = MergeSampleLists.merged_samples,
       sample_batch_map = MakeManifests.sample_manifest,
       linux_docker = linux_docker,
       runtime_attr_override = runtime_override_get_sample_batches
@@ -200,7 +208,8 @@ workflow DeNovoSV {
   # Makes a ped file of singletons, duos, and trios for input into the de novo script (only including families of interest)
   call CleanPed {
     input:
-      ped_file = final_ped,
+      ped_file = working_ped,
+      vcf_samples = MergeSampleLists.merged_samples,
       variant_interpretation_docker = variant_interpretation_docker,
       runtime_attr_override = runtime_override_clean_ped
   }
@@ -678,7 +687,7 @@ task SubsetPedByFams {
 # Get the batches associated with the given samples.
 task GetSampleBatches {
   input {
-    Array[File] samples
+    File samples
     File sample_batch_map
     String linux_docker
     RuntimeAttr? runtime_attr_override
@@ -708,9 +717,8 @@ task GetSampleBatches {
   command <<<
     set -euo pipefail
 
-    cat '~{write_lines(samples)}' \
-      | xargs -L -- cat \
-      | awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($2 in a){print $1}' \
+    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($2 in a){print $1}' \
+      '~{samples}' '~{sample_batch_map}'
       | LC_ALL=C sort -u > batches.list
   >>>
 
@@ -964,6 +972,7 @@ task CreatePlots {
 task CleanPed {
   input {
     File ped_file
+    File vcf_samples
     String variant_interpretation_docker
     RuntimeAttr? runtime_attr_override
   }
@@ -993,12 +1002,58 @@ task CleanPed {
   command <<<
     set -exuo pipefail
 
+    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && FNR==1{print; next} NR>FNR && ($2 in a)' \
+      '~{vcf_samples}' '~{ped_file}' > filtered.ped
+
     # TODO: this script should get the name of the output file it generates as an input argument.
     # The output filename is currently hardcoded to be 'clean_ped.txt'.
-    Rscript /src/denovo/clean_ped.R ~{ped_file}
+    Rscript /src/denovo/clean_ped.R filtered.ped
   >>>
 
   output {
     File cleaned_ped = "clean_ped.txt"
+  }
+}
+
+# Merge lists of samples
+task MergeSampleLists {
+  input {
+    Array[File] samples
+    String linux_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float input_size = size(samples, "GB")
+
+  RuntimeAttr default_attr = object {
+    mem_gb: 2,
+    disk_gb: ceil(16 + input_size * 2),
+    cpu_cores: 1,
+    preemptible_tries: 3,
+    max_retries: 1,
+    boot_disk_gb: 8
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: linux_docker
+  }
+
+  command <<<
+    set -euo pipefail
+
+    cat '~{write_lines(samples)}' \
+      | xargs -L 1 -- cat \
+      | LC_ALL=C sort -u > merged_samples.list
+  >>>
+
+  output {
+    File merged_samples = "merged_samples.list"
   }
 }
