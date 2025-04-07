@@ -182,6 +182,7 @@ workflow DeNovoSV {
     input:
       samples = GetSampleIdsFromVcf.out_file,
       sample_batch_map = MakeManifests.sample_manifest,
+      linux_docker = linux_docker,
       runtime_attr_override = runtime_override_get_sample_batches
   }
 
