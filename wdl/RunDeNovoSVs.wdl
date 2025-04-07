@@ -461,6 +461,9 @@ task MatchVcfToContig {
     docker: sv_base_mini_docker
   }
 
+  String vcf_bn = basename(vcf)
+  String vcf_index_bn = basename(vcf_index)
+
   command <<<
     set -euo pipefail
 
@@ -479,10 +482,12 @@ task MatchVcfToContig {
     # If the contig in the VCF matched one of the input contigs, then
     # matched_contig.list should contain the matched contig and have a non-zero
     # filesize.
+    mv '~{vcf}' '~{vcf_bn}'
+    mv '~{vcf_index}' '~{vcf_index_bn}'
     if [[ ! -s matched_contig.list ]]; then
       printf '\n' > matched_contig.list
-      rm '~{vcf}'
-      rm '~{vcf_index}'
+      rm '~{vcf_bn}'
+      rm '~{vcf_index_bn}'
     fi
   >>>
 
@@ -493,8 +498,8 @@ task MatchVcfToContig {
   # problematic because this task relies on outputting optional values to
   # indicate that a VCF did not match a contig.
   output {
-    File? matched_vcf = vcf
-    File? matched_vcf_index = vcf_index
+    File? matched_vcf = vcf_bn
+    File? matched_vcf_index = vcf_index_bn
     String? matched_contig = if read_string("matched_contig.list") == "" then null else read_string("matched_contig.list")
   }
 }
