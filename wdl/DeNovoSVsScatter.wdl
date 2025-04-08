@@ -176,9 +176,9 @@ task RunDeNovo {
     set -exuo pipefail
 
     printf "small_cnv_size: '%d'\n" '~{small_cnv_size}' > config.py
-    printf "intermediate_cnv_size: '%d'\n" '~{intermediate_cnv_size}' > config.py
-    printf "depth_only_size: '%d'\n" '~{depth_only_size}' > config.py
-    printf "exclude_parent_cnv_size: '%d'\n" '~{exclude_parent_cnv_size}' > config.py
+    printf "intermediate_cnv_size: '%d'\n" '~{intermediate_cnv_size}' >> config.py
+    printf "depth_only_size: '%d'\n" '~{depth_only_size}' >> config.py
+    printf "exclude_parent_cnv_size: '%d'\n" '~{exclude_parent_cnv_size}' >> config.py
     printf "gnomad_AF: '%0.2f'\n" '~{gnomad_af}' >> config.py
     printf "parents_AF: '%0.2f'\n" '~{parents_af}' >> config.py
     printf "cohort_AF: '%0.2f'\n" '~{cohort_af}' >> config.py
