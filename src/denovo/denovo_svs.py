@@ -623,14 +623,10 @@ def main():
     if len(bed_filt_ins.index) > 0:
         verbose_print('Checking if insertion in proband is in raw files', verbose)
         bed_filt_ins_proband = convert_to_bedtool(bed_filt_ins, cols_to_keep = cols_keep_child, sort = True)
-        ins_names_overlap_proband =
-        get_insertion_intersection(bed_filt_ins_proband, raw_bed_ref_child,
-                                   nearby_insertion)
+        ins_names_overlap_proband = get_insertion_intersection(bed_filt_ins_proband, raw_bed_ref_child, nearby_insertion)
         verbose_print('Checking if insertion in proband are also in raw files for the parents', verbose)
         bed_filt_ins_fam = convert_to_bedtool(bed_filt_ins, cols_to_keep = cols_keep_parent, sort = True)
-        ins_names_overlap_parent = get_insertion_intersection(bed_filt_ins_fam,
-                                                              raw_bed_ref_parent,
-                                                              nearby_insertion)
+        ins_names_overlap_parent = get_insertion_intersection(bed_filt_ins_fam, raw_bed_ref_parent, nearby_insertion)
         ins_names_overlap = [x for x in ins_names_overlap_proband if x not in ins_names_overlap_parent]
     else:
         ins_names_overlap = ['']
