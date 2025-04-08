@@ -276,7 +276,7 @@ workflow DeNovoSV {
         bed = GetContigFromPesrBed.contig_bed,
         contig = contig,
         type = "",
-        pedigree = pedigree,
+        pedigree = working_ped,
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_reformat_bed
     }
@@ -286,7 +286,7 @@ workflow DeNovoSV {
         bed = GetContigFromDepthBed.contig_bed,
         contig = contig,
         type = "depth",
-        pedigree = pedigree,
+        pedigree = working_ped,
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_reformat_bed
     }
@@ -363,7 +363,7 @@ workflow DeNovoSV {
   call CreatePlots {
     input:
       bed_file = CallOutliers.final_denovo_nonOutliers_output,
-      ped_file = pedigree,
+      ped_file = working_ped,
       variant_interpretation_docker=variant_interpretation_docker,
       runtime_attr_override = runtime_override_create_plots
   }
@@ -830,12 +830,14 @@ task ReformatContigBed {
   String proband_bed = "${contig}.proband${type_str}.reformatted.sorted.bed.gz"
   String parents_bed = "${contig}.parents${type_str}.reformatted.sorted.bed.gz"
   command <<<
+    set -euo pipefail
+
     # FamID ParentalID
-    awk -F'\t' '!/^#/ && $1 !~ /FamID/' \
-      | awk -F'\t' '$3 && $3!=0{print $1,$3} $4 && $4!=0{print $1,$4}' OFS='\t' '~{pedigree}' \
+    awk -F'\t' '!/^#/ && $1 !~ /FamID/' '~{pedigree}' \
+      | awk -F'\t' '$3 && $3!=0{print $1,$3} $4 && $4!=0{print $1,$4}' OFS='\t' \
       | sort -u > parents.tsv
     # ChildID
-    awk -F'\t' '!/^#/ && $1 !~ /FamID/' \
+    awk -F'\t' '!/^#/ && $1 !~ /FamID/' '~{pedigree}' \
       | awk -F'\t' 'NR==FNR{a[$2]} NR>FNR && !($2 in a){print $2}' parents.tsv - \
       | sort -u > children.list
 
