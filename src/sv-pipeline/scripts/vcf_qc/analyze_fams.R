@@ -1339,7 +1339,7 @@ args <- parse_args(OptionParser(usage="%prog svstats.bed famfile perSampleDir OU
 opts <- args$options
 
 ###Checks for appropriate positional arguments
-if(length(args$args) != 4){
+if(length(args$args) != 5){
   stop("Incorrect number of required positional arguments\n")
 }
 
@@ -1348,6 +1348,7 @@ dat.in <- args$args[1]
 famfile.in <- args$args[2]
 perSampDir <- args$args[3]
 OUTDIR <- args$args[4]
+denovo_dump <- args$args[5]
 svtypes.file <- opts$svtypes
 multiallelics <- opts$multiallelics
 maxgq <- opts$maxgq
@@ -1428,6 +1429,8 @@ if(nrow(trios)>0){
                      biallelic=!multiallelics, max.GQ=maxgq))
   })
   names(trio.dat) <- trios[,1]
+
+  save(trio.dat, file = denovo_dump)
  
   # if there are no GQ values in any of the trios, do not make GQ plots
   gq <- any(unlist(lapply(trio.dat, function(trio){ sum(!is.na(trio$pro.GQ)) > 0 })))

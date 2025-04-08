@@ -136,6 +136,7 @@ workflow PlotQcPerFamily {
   # Final output
   output {
     File qc_per_family_plots = PlotQcPerFamily.perFamily_plots_tarball
+    File denovos = PlotQcPerFamily.denovo_dump
   }
 }
 
@@ -283,6 +284,7 @@ task PlotQcPerFamily {
         cleaned.subset.fam \
         ~{prefix}_perSample/ \
         ~{prefix}_perFamily_plots/ \
+        denovo_dump.rdx \
         --maxgq ~{max_gq}
 
     else
@@ -300,5 +302,6 @@ task PlotQcPerFamily {
   output {
     File perFamily_plots_tarball = "~{prefix}.plotQC_perFamily.tar.gz"
     File cleaned_fam_file = "~{prefix}.cleaned.fam"
+    File denovo_dump = "denovo_dump.rdx"
   }
 }
