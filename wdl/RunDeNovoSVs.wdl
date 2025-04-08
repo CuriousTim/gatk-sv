@@ -236,9 +236,12 @@ workflow DeNovoSV {
     }
   }
 
+  # The VcfToBed task outputs a bgzip compressed file, but the format allows
+  # compressed files to be concatenated.
   call miniTasks.CatUncompressedFiles as MergePesrBed {
     input:
       shards = PesrVcfToBed.bed_output,
+      outfile_name = "merged_pesr.bed.gz",
       sv_base_mini_docker = sv_base_mini_docker,
       runtime_attr_override = runtime_override_merge_clustered_bed
   }
@@ -246,6 +249,7 @@ workflow DeNovoSV {
   call miniTasks.CatUncompressedFiles as MergeDepthBed {
     input:
       shards = DepthVcfToBed.bed_output,
+      outfile_name = "merged_depth.bed.gz",
       sv_base_mini_docker = sv_base_mini_docker,
       runtime_attr_override = runtime_override_merge_clustered_bed
   }
@@ -774,8 +778,11 @@ task GetContigFromBed {
 
   command <<<
     set -euo pipefail
+
+    # The BED file will have "header" lines starting with "#chrom"
     bgzip -cd '~{bed}' \
-      | awk -F'\t' '$1 == "~{contig}"' \
+      | grep -v '^#' \
+      | awk -F'\t' 'NR==1 || $1 == "~{contig}"' \
       | bgzip -c > '~{contig}.bed.gz'
   >>>
 
@@ -822,22 +829,25 @@ task ReformatContigBed {
   String type_str = if type == "" then "" else ".${type}"
   command <<<
     # FamID ParentalID
-    awk -F'\t' 'BEGIN{OFS="\t"} /^#/ || $1 ~ /FamID/{next} {print $1,$3; print $1,$4}' '~{pedigree}' \
+    awk -F'\t' '!/^#/ && $1 !~ /FamID/' \
+      | awk -F'\t' '$3 && $3!=0{print $1,$3} $4 && $4!=0{print $1,$4}' OFS='\t' '~{pedigree}' \
       | sort -u > parents.tsv
     # ChildID
-    awk -F'\t' 'BEGIN{OFS="\t"} /^#/ || $1 ~ /FamID/{next} NR==FNR{a[$2]} NR>FNR && !($2 in a){print $2}' parents.tsv '~{pedigree}' \
+    awk -F'\t' '!/^#/ && $1 !~ /FamID/' \
+      | awk -F'\t' 'NR==FNR{a[$2]} NR>FNR && !($2 in a){print $2}' parents.tsv - \
       | sort -u > children.list
 
     # CHROM start end SVTYPE samples
     bgzip -cd '~{bed}' \
-      | awk -F'\t' 'BEGIN{OFS="\t"} /^#/{next} {split($6, a, /,/); for(i in a){print $1,$2,$3,$7,a[i]}}' \
+      | grep -v '^#' \
+      | awk -F'\t' '{split($6, a, /,/); for(i in a){print $1,$2,$3,$7,a[i]}}' \
       | awk 'BEGIN{OFS="\t"
                    out_c="sort -k1,1 -k2,2n | bgzip -c > ~{contig}.proband~{type_str}.reformatted.bed.gz"
                    out_p="sort -k1,1 -k2,2n | bgzip -c > ~{contig}.parents~{type_str}.reformatted.bed.gz"}
              FILENAME == ARGV[1]{c[$1]}
              FILENAME == ARGV[2]{p[$2]=$1}
              FILENAME == ARGV[3] && ($5 in p){print $1"_"$4"_"p[$5],$2,$3,$4,$5 | out_p}
-             FILENAME == ARGV[3] && ($5 in c}{print $1"_"$4"_"$5,$2,$3,$4,$5 | out_c}' children.list parents.tsv -
+             FILENAME == ARGV[3] && ($5 in c){print $1"_"$4"_"$5,$2,$3,$4,$5 | out_c}' children.list parents.tsv -
   >>>
 
   # Proband output should be a tab-delimited file with columns:
