@@ -37,8 +37,8 @@ workflow DeNovoSVsScatter {
     Int coverage_cutoff = 10
     Float gq_min = 0
     # Other
-    String gnomad_col = "gnomAD_V2_AF"
-    String alt_gnomad_col = "gnomad_v2.1_sv_AF"
+    String gnomad_col = "gnomad_v4.1_sv_AF"
+    String alt_gnomad_col = "gnomad_v4.1_sv_AF"
 
     String variant_interpretation_docker
     String sv_pipeline_docker
