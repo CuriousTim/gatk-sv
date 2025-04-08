@@ -192,6 +192,10 @@ task RunDeNovo {
     printf "gnomad_col: '%s'\n" '~{gnomad_col}' >> config.py
     printf "alt_gnomad_col: '%s'\n" '~{alt_gnomad_col}' >> config.py
 
+    # The MakeManifests tasks uses a batchID, sampleID column order while
+    # denovo_svs.py expects the columns flipped.
+    awk -F'\t' '{print $2"\t"$1}' '~{sample_batches}' > sample_batches_swapped.tsv
+
     export GCS_OAUTH_TOKEN=`gcloud auth application-default print-access-token`
 
     bcftools view ~{vcf} | grep -v ^## | bgzip -c > ~{basename}.noheader.vcf.gz
@@ -208,7 +212,7 @@ task RunDeNovo {
         --config config.py \
         --exclude_regions ~{exclude_regions} \
         --coverage ~{batch_bincov_index} \
-        --sample_batches ~{sample_batches} \
+        --sample_batches sample_batches_swapped.tsv \
         --verbose True
 
     bgzip ~{basename}.denovo.bed
