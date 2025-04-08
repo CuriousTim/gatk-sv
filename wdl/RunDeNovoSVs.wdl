@@ -827,6 +827,8 @@ task ReformatContigBed {
   }
 
   String type_str = if type == "" then "" else ".${type}"
+  String proband_bed = "${contig}.proband${type_str}.reformatted.sorted.bed.gz"
+  String parents_bed = "${contig}.parents${type_str}.reformatted.sorted.bed.gz"
   command <<<
     # FamID ParentalID
     awk -F'\t' '!/^#/ && $1 !~ /FamID/' \
@@ -842,8 +844,8 @@ task ReformatContigBed {
       | grep -v '^#' \
       | awk -F'\t' '{split($6, a, /,/); for(i in a){print $1,$2,$3,$7,a[i]}}' \
       | awk 'BEGIN{OFS="\t"
-                   out_c="sort -k1,1 -k2,2n | bgzip -c > ~{contig}.proband~{type_str}.reformatted.sorted.bed.gz"
-                   out_p="sort -k1,1 -k2,2n | bgzip -c > ~{contig}.parents~{type_str}.reformatted.sorted.bed.gz"}
+                   out_c="sort -k1,1 -k2,2n | bgzip -c > ~{proband_bed}"
+                   out_p="sort -k1,1 -k2,2n | bgzip -c > ~{parents_bed}"}
              FILENAME == ARGV[1]{c[$1]}
              FILENAME == ARGV[2]{p[$2]=$1}
              FILENAME == ARGV[3] && ($5 in p){print $1"_"$4"_"p[$5],$2,$3,$4,$5 | out_p}
@@ -856,8 +858,8 @@ task ReformatContigBed {
   # Parents output is a tab-delimited file with columns:
   # CHROM_SVTYPE_FamID start end SVTYPE sample
   output {
-    File reformatted_proband_bed = "${contig}.proband${type_str}.reformatted.sorted.bed.gz"
-    File reformatted_parents_bed = "${contig}.proband${type_str}.reformatted.sorted.bed.gz"
+    File reformatted_proband_bed = proband_bed
+    File reformatted_parents_bed = parents_bed
   }
 }
 
