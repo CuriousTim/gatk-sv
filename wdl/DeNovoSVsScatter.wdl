@@ -186,7 +186,7 @@ task RunDeNovo {
     printf "small_raw_overlap: '%0.1f'\n" '~{small_raw_overlap}' >> config.py
     printf "parents_overlap: '%0.1f'\n" '~{parents_overlap}' >> config.py
     printf "blacklist_overlap: '%0.1f'\n" '~{blacklist_overlap}' >> config.py
-    printf "nearby_insertion: '%0.1f'\n" '~{nearby_insertion}' >> config.py
+    printf "nearby_insertion: '%d'\n" '~{nearby_insertion}' >> config.py
     printf "coverage_cutoff: '%d'\n" '~{coverage_cutoff}' >> config.py
     printf "gq_min: '%0.2f'\n" '~{gq_min}' >> config.py
     printf "gnomad_col: '%s'\n" '~{gnomad_col}' >> config.py
