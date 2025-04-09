@@ -355,6 +355,7 @@ workflow DeNovoSV {
   call CallOutliers {
     input:
       bed_file = MergeDenovoBedFiles.merged_denovo_output,
+      denovo_outlier_factor = denovo_outlier_factor,
       variant_interpretation_docker=variant_interpretation_docker,
       runtime_attr_override = runtime_override_call_outliers
   }
@@ -912,6 +913,7 @@ task MergeDenovoBedFiles {
 task CallOutliers {
   input {
     File bed_file
+    Int denovo_outlier_factor
     String variant_interpretation_docker
     RuntimeAttr? runtime_attr_override
   }
@@ -941,7 +943,8 @@ task CallOutliers {
   command <<<
     set -exuo pipefail
 
-    python /src/denovo/denovo_outliers.py --bed ~{bed_file}
+    python /src/denovo/denovo_outliers.py --bed ~{bed_file} \
+      --denovo_outlier_factor ~{denovo_outlier_factor}
 
     bgzip final.denovo.merged.bed
     bgzip final.denovo.merged.outliers.bed
