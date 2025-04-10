@@ -6,6 +6,10 @@ COPY /src/denovo /src/denovo/
 # make & cpp are needed for installing `tidyverse`.
 RUN apt-get -qqy update && \
     apt-get -qqy install ca-certificates build-essential && \
+    R -e 'install.packages( \
+        "https://cran.r-project.org/src/contrib/Archive/yulab.utils/yulab.utils_0.1.9.tar.gz", \
+        INSTALL_opts = c("--no-docs", "--without-keep.source"), \
+        quiet = TRUE)' && \
     Rscript -e "\
         install.packages( \
             c( \
