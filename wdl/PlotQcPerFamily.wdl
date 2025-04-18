@@ -9,7 +9,7 @@ import "Utils.wdl" as Utils
 # an SV VCF output by GATK-SV
 workflow PlotQcPerFamily {
   input {
-    Array[File] vcfs  # Option to provide a single GATK-SV VCF or an array of position-sharded SV VCFs. Must be indexed
+    Array[File] vcfs  # One VCF per contig.
     Boolean vcf_format_has_cn = true
     String? bcftools_preprocessing_options
     File ped_file
@@ -56,7 +56,7 @@ workflow PlotQcPerFamily {
     # Collect VCF-wide summary stats
     call vcfwideqc.CollectQcVcfWide {
       input:
-        vcfs=vcfs,
+        vcfs=[vcfs[i]],
         contig=contigs[i],
         sv_per_shard=sv_per_shard,
         bcftools_preprocessing_options=bcftools_preprocessing_options,
