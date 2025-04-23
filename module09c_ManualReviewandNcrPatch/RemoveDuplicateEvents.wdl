@@ -4,27 +4,30 @@ import "Structs.wdl"
 
 workflow RemoveDuplicateEvents {
   input {
-    File vcf
-    File? vcf_index
-    String prefix
+    Array[File] vcfs
+    Array[File] vcf_indicies
+    File prefix_per_vcf
 
     String sv_pipeline_docker
     RuntimeAttr? runtime_attr_remove_duplicate_events_task
   }
 
-  call RemoveDuplicateEventsTask {
-    input:
-      vcf = vcf,
-      vcf_index = select_first([vcf_index, "~{vcf}.tbi"]),
-      prefix = prefix,
-      sv_pipeline_docker = sv_pipeline_docker,
-      runtime_attr_override = runtime_attr_remove_duplicate_events_task
+  Array[String] prefixes = read_lines(prefix_per_vcf)
+  scatter (i in range(length(vcfs))) {
+    call RemoveDuplicateEventsTaskV2 {
+      input:
+        vcf = vcfs[i],
+        vcf_index = vcf_indicies[i],
+        out_prefix = prefixes[i],
+        sv_pipeline_docker = sv_pipeline_docker,
+        runtime_attr_override = runtime_attr_remove_duplicate_events_task
+    }
   }
 
   output {
-    File deduplicated_vcf = RemoveDuplicateEventsTask.deduplicated_vcf
-    File deduplicated_vcf_index = RemoveDuplicateEventsTask.deduplicated_vcf_index
-    File duplicated_events_table = RemoveDuplicateEventsTask.duplicated_events_table
+    Array[File] deduplicated_vcf = RemoveDuplicateEventsTaskV2.deduplicated_vcf
+    Array[File] deduplicated_vcf_index = RemoveDuplicateEventsTaskV2.deduplicated_vcf_index
+    Array[File] duplicated_events_table = RemoveDuplicateEventsTaskV2.duplicated_events_table
   }
 }
 
@@ -86,14 +89,14 @@ task RemoveDuplicateEventsTaskV2 {
   input {
     File vcf
     File vcf_index
-    String prefix
+    String out_prefix
 
     String sv_pipeline_docker
     RuntimeAttr? runtime_attr_override
   }
 
-  String output_vcf = "~{prefix}.duplicates_removed.vcf.gz"
-  String output_table = "~{prefix}.duplicated_events.tsv"
+  String output_vcf = "~{out_prefix}-duplicates_removed.vcf.gz"
+  String output_table = "~{out_prefix}-duplicated_events.tsv"
 
   # Disk must be scaled proportionally to the size of the VCF
   Float input_size = size(vcf, "GiB")
