@@ -127,7 +127,7 @@ task RemoveDuplicateEventsTaskV2 {
           record.pos == other.pos and
           record.stop == other.stop and
           record.info['SVTYPE'] == other.info['SVTYPE'] and
-          record.info['SVLEN'] == other.info['SVLEN'] and
+          (('SVLEN' not in record.info and 'SVLEN' not in other.info) or ('SVLEN' in record.info and 'SVLEN' in other.info and record.info['SVLEN'] == other.info['SVLEN'])) and
           (('CPX_TYPE' not in record.info and 'CPX_TYPE' not in other.info) or ('CPX_TYPE' in record.info and 'CPX_TYPE' in other.info and record.info['CPX_TYPE'] == other.info['CPX_TYPE'])) and
           (('CPX_INTERVALS' not in record.info and 'CPX_INTERVALS' not in other.info) or ('CPX_INTERVALS' in record.info and 'CPX_INTERVALS' in other.info and record.info['CPX_INTERVALS'] == other.info['CPX_INTERVALS'])) and
           (('STRANDS' not in record.info and 'STRANDS' not in other.info) or ('STRANDS' in record.info and 'STRANDS' in other.info and record.info['STRANDS'] == other.info['STRANDS'])) and
