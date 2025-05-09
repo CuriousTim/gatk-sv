@@ -327,9 +327,7 @@ def main():
     depth_only_size = int(config['depth_only_size'])
     exclude_parent_cnv_size = int(config['exclude_parent_cnv_size'])
     # Allele frequency
-    gnomad_af = float(config['gnomad_AF'])
     parents_af = float(config['parents_AF'])
-    cohort_af = float(config['cohort_AF'])
     # Overlap parameters
     large_raw_overlap = float(config['large_raw_overlap'])
     small_raw_overlap = float(config['small_raw_overlap'])
@@ -339,29 +337,25 @@ def main():
     # SV quality (parents)
     coverage_cutoff = int(config['coverage_cutoff'])
     gq_min = float(config['gq_min'])
-    # Other
-    gnomad_col = config['gnomad_col']
-    alt_gnomad_col = config['alt_gnomad_col']
-    #af_column_name = config['af_column_name']        # Not sure yet how to deal with that one given that it is optional.
 
     
     # Read in files
     verbose_print('Reading Input Files', verbose)
-    bed = pd.read_csv(bed_file, sep='\t').replace(np.nan, '', regex=True)
+    bed = pd.read_csv(bed_file, sep = '\t').replace(np.nan, '', regex = True)
     bed = bed[(bed['samples'] != "")]
-    bed.rename(columns={'#chrom': 'chrom'}, inplace=True)
-    vcf = pd.read_csv(vcf_file, sep='\t')
-    ped = pd.read_csv(ped_file, sep='\t')
+    bed.rename(columns={'#chrom': 'chrom'}, inplace = True)
+    vcf = pd.read_csv(vcf_file, sep = '\t')
+    ped = pd.read_csv(ped_file, sep = '\t')
     raw_bed_colnames = ['ID', 'start', 'end', 'svtype', 'sample']
-    raw_bed_child = pd.read_csv(raw_file_proband, sep='\t', names=raw_bed_colnames, header=None).replace(np.nan, '', regex=True)
-    raw_bed_parent = pd.read_csv(raw_file_parent, sep='\t', names=raw_bed_colnames, header=None).replace(np.nan, '', regex=True)
-    raw_bed_depth_child = pd.read_csv(raw_file_depth_proband, sep='\t', names=raw_bed_colnames, header=None).replace(np.nan, '', regex=True)
-    raw_bed_depth_parent = pd.read_csv(raw_file_depth_parent, sep='\t', names=raw_bed_colnames, header=None).replace(np.nan, '', regex=True)
+    raw_bed_child = pd.read_csv(raw_file_proband, sep ='\t', names=raw_bed_colnames, header = None).replace(np.nan, '', regex = True)
+    raw_bed_parent = pd.read_csv(raw_file_parent, sep = '\t', names=raw_bed_colnames, header = None).replace(np.nan, '', regex = True)
+    raw_bed_depth_child = pd.read_csv(raw_file_depth_proband, sep = '\t', names=raw_bed_colnames, header = None).replace(np.nan, '', regex = True)
+    raw_bed_depth_parent = pd.read_csv(raw_file_depth_parent, sep = '\t', names=raw_bed_colnames, header = None).replace(np.nan, '', regex = True)
     exclude_regions = pd.read_csv(exclude_regions, sep='\t').replace(np.nan, '', regex=True)
     bincov_colnames = ['batch', 'bincov', 'index']
     sample_batches_colnames = ['sample', 'batch']
-    bincov = pd.read_csv(coverage, sep='\t', names=bincov_colnames, header=None).replace(np.nan, '', regex=True)
-    sample_batches = pd.read_csv(batches, sep='\t', names=sample_batches_colnames, header=None).replace(np.nan, '', regex=True)
+    bincov = pd.read_csv(coverage, sep = '\t', names=bincov_colnames, header = None).replace(np.nan, '', regex = True)
+    sample_batches = pd.read_csv(batches, sep = '\t', names=sample_batches_colnames, header = None).replace(np.nan, '', regex = True)
 
     
     #########################
