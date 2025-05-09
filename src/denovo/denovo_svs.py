@@ -295,7 +295,6 @@ def main():
     parser.add_argument('--raw_depth_proband', dest='raw_depth_proband', help='Directory with raw SV depth calls - output from m04')
     parser.add_argument('--raw_depth_parents', dest='raw_depth_parents', help='Directory with raw depth SV calls - output from m04')
     parser.add_argument('--config', dest='config', help='Config file')
-    parser.add_argument('--exclude_regions', dest='exclude_regions', help='File containing regions with known somatic mutations')
     parser.add_argument('--coverage', dest='coverage', help='File with batch in first column respective coverage file in second column')
     parser.add_argument('--sample_batches', dest='sample_batches', help='File with samples in first column and their respective batch in second column')
     parser.add_argument('--verbose', dest='verbose', help='Verbosity')
@@ -312,7 +311,6 @@ def main():
     raw_file_depth_parent = args.raw_depth_parents
     verbose = args.verbose
     config_file = args.config
-    exclude_regions = args.exclude_regions
     coverage = args.coverage
     batches = args.sample_batches
 
@@ -327,41 +325,33 @@ def main():
     depth_only_size = int(config['depth_only_size'])
     exclude_parent_cnv_size = int(config['exclude_parent_cnv_size'])
     # Allele frequency
-    gnomad_af = float(config['gnomad_AF'])
     parents_af = float(config['parents_AF'])
-    cohort_af = float(config['cohort_AF'])
     # Overlap parameters
     large_raw_overlap = float(config['large_raw_overlap'])
     small_raw_overlap = float(config['small_raw_overlap'])
     parents_overlap = float(config['parents_overlap'])
-    blacklist_overlap = float(config['blacklist_overlap'])
     nearby_insertion = int(config['nearby_insertion'])
     # SV quality (parents)
     coverage_cutoff = int(config['coverage_cutoff'])
     gq_min = float(config['gq_min'])
-    # Other
-    gnomad_col = config['gnomad_col']
-    alt_gnomad_col = config['alt_gnomad_col']
-    #af_column_name = config['af_column_name']        # Not sure yet how to deal with that one given that it is optional.
 
     
     # Read in files
     verbose_print('Reading Input Files', verbose)
-    bed = pd.read_csv(bed_file, sep='\t').replace(np.nan, '', regex=True)
+    bed = pd.read_csv(bed_file, sep = '\t').replace(np.nan, '', regex = True)
     bed = bed[(bed['samples'] != "")]
-    bed.rename(columns={'#chrom': 'chrom'}, inplace=True)
-    vcf = pd.read_csv(vcf_file, sep='\t')
-    ped = pd.read_csv(ped_file, sep='\t')
+    bed.rename(columns={'#chrom': 'chrom'}, inplace = True)
+    vcf = pd.read_csv(vcf_file, sep = '\t')
+    ped = pd.read_csv(ped_file, sep = '\t')
     raw_bed_colnames = ['ID', 'start', 'end', 'svtype', 'sample']
-    raw_bed_child = pd.read_csv(raw_file_proband, sep='\t', names=raw_bed_colnames, header=None).replace(np.nan, '', regex=True)
-    raw_bed_parent = pd.read_csv(raw_file_parent, sep='\t', names=raw_bed_colnames, header=None).replace(np.nan, '', regex=True)
-    raw_bed_depth_child = pd.read_csv(raw_file_depth_proband, sep='\t', names=raw_bed_colnames, header=None).replace(np.nan, '', regex=True)
-    raw_bed_depth_parent = pd.read_csv(raw_file_depth_parent, sep='\t', names=raw_bed_colnames, header=None).replace(np.nan, '', regex=True)
-    exclude_regions = pd.read_csv(exclude_regions, sep='\t').replace(np.nan, '', regex=True)
+    raw_bed_child = pd.read_csv(raw_file_proband, sep ='\t', names=raw_bed_colnames, header = None).replace(np.nan, '', regex = True)
+    raw_bed_parent = pd.read_csv(raw_file_parent, sep = '\t', names=raw_bed_colnames, header = None).replace(np.nan, '', regex = True)
+    raw_bed_depth_child = pd.read_csv(raw_file_depth_proband, sep = '\t', names=raw_bed_colnames, header = None).replace(np.nan, '', regex = True)
+    raw_bed_depth_parent = pd.read_csv(raw_file_depth_parent, sep = '\t', names=raw_bed_colnames, header = None).replace(np.nan, '', regex = True)
     bincov_colnames = ['batch', 'bincov', 'index']
     sample_batches_colnames = ['sample', 'batch']
-    bincov = pd.read_csv(coverage, sep='\t', names=bincov_colnames, header=None).replace(np.nan, '', regex=True)
-    sample_batches = pd.read_csv(batches, sep='\t', names=sample_batches_colnames, header=None).replace(np.nan, '', regex=True)
+    bincov = pd.read_csv(coverage, sep = '\t', names=bincov_colnames, header = None).replace(np.nan, '', regex = True)
+    sample_batches = pd.read_csv(batches, sep = '\t', names=sample_batches_colnames, header = None).replace(np.nan, '', regex = True)
 
     
     #########################
@@ -369,8 +359,8 @@ def main():
     #########################
     # Exit out of bed file is empty
     if bed.size == 0:
-        bed.to_csv(path_or_buf=out_file, mode='a', index=False, sep='\t', header=True)
-        bed.to_csv(path_or_buf=de_novo_out_file, mode='a', index=False, sep='\t', header=True)
+        bed.to_csv(path_or_buf = out_file, mode = 'a', index = False, sep = '\t', header = True)
+        bed.to_csv(path_or_buf = de_novo_out_file, mode = 'a', index = False, sep = '\t', header = True)
         exit()
     # Get parents and children ids
     verbose_print('Getting parents/children/affected/unaffected IDs', verbose)
@@ -396,15 +386,6 @@ def main():
     delta = end - start
     print("Took %f seconds to process" % delta)
 
-    # Remove mCNVs, BNDs and SVs in sex chromosomes
-    start = time.time()
-    verbose_print('Remove BND and mCNV', verbose)
-    bed = bed[(~bed['svtype'].isin(['BND', 'CNV']))]
-    # bed = bed[(~bed['svtype'].isin(['BND', 'CNV']) & (~bed['chrom'].isin(["chrY", "chrX"])))]
-    end = time.time()
-    delta = end - start
-    print("Took %f seconds to process" % delta)
-
     # Flag if small or large CNV based on small_cnv_size cutoff and flag for removal based on size for depth-only calls
     verbose_print('Flagging calls depending on size', verbose)
     start = time.time()
@@ -424,7 +405,7 @@ def main():
     delta = end - start
     print("Took %f seconds to process" % delta)
 
-    # Sepparate variants in children and parents
+    # Separate variants in children and parents
     verbose_print('Sepparate variants in children and parents', verbose)
     start = time.time()
     bed_child = bed_split[bed_split['sample'].isin(children)]
@@ -438,27 +419,6 @@ def main():
     bed_child['name_famid'] = bed_child['name'] + "_" + bed_child['family_id'].astype(str).str.strip("[]")
     bed_parents['family_id'] = bed_parents.apply(lambda r: get_family_id(r, ped), axis=1)
     bed_parents['name_famid'] = bed_parents['name'] + "_" + bed_parents['family_id'].astype(str).str.strip("[]")
-
-    # Filter out by frequency - AF gnomad < 0.01
-    verbose_print('Filtering by frequency', verbose)
-    start = time.time()
-    bed_child["AF"] = pd.to_numeric(bed_child["AF"])
-    try:
-        bed_child[gnomad_col] = pd.to_numeric(bed_child[gnomad_col])
-        remove_freq = bed_child[~((((bed_child[gnomad_col] <= gnomad_af) & (bed_child['AF'] <= cohort_af)) |
-                                   ((bed_child[gnomad_col].isnull()) & (bed_child['AF'] <= cohort_af))))]['name_famid'].to_list()
-        bed_child['is_de_novo'] = pd.Series(True, index=bed_child.index).mask(bed_child['name_famid'].isin(remove_freq), False)
-        bed_child['filter_flag'] = pd.Series('de_novo', index=bed_child.index).mask(bed_child['name_famid'].isin(remove_freq), 'AF')
-
-    except KeyError:
-        bed_child[alt_gnomad_col] = pd.to_numeric(bed_child[alt_gnomad_col])
-        remove_freq = bed_child[~((((bed_child[alt_gnomad_col] <= gnomad_af) & (bed_child['AF'] <= cohort_af)) |
-                                   ((bed_child[alt_gnomad_col].isnull()) & (bed_child['AF'] <= cohort_af))))]['name_famid'].to_list()
-        bed_child['is_de_novo'] = pd.Series(True, index=bed_child.index).mask(bed_child['name_famid'].isin(remove_freq), False)
-        bed_child['filter_flag'] = pd.Series('de_novo', index=bed_child.index).mask(bed_child['name_famid'].isin(remove_freq), 'AF')
-    end = time.time()
-    delta = end - start
-    print("Took %f seconds to process" % delta)
 
     # Get counts within family and remove if SV in parents
     verbose_print('Keep variants in children only', verbose)
@@ -694,35 +654,11 @@ def main():
     #############
     verbose_print('Filtering out calls', verbose)
 
-    # 1. Filter out calls in exclude regions
-    verbose_print('Filtering out calls in exclude regions', verbose)
-    start = time.time()
-    # Reformat exclude_regions to bedtool
-    exclue_regions_bt = convert_to_bedtool(exclude_regions, sort=True)
-    # convert bed_final to bedtool
-    cols_keep_exclude_regions = ['chrom', 'start', 'end', 'name', 'svtype', 'sample', 'name_famid']
-    if len(bed_child.index) > 0:
-        bed_child_bt = convert_to_bedtool(bed_child, cols_keep_exclude_regions, sort=True)
-        exclude_regions_intersect = bed_child_bt.coverage(exclue_regions_bt).to_dataframe(disable_auto_names = True, header = None)  # HB said to use bedtools coverage, -f and -F give the same SVs to be removed
-        if len(exclude_regions_intersect) != 0:
-            remove_regions = exclude_regions_intersect[exclude_regions_intersect[10] > blacklist_overlap][6].to_list()
-        else:
-            remove_regions = ['']
-    else:
-        remove_regions = ['']
-
-    bed_child.loc[bed_child['name_famid'].isin(remove_regions) & bed_child['is_de_novo'], 'filter_flag'] = 'in_blacklist_region'
-    bed_child.loc[bed_child['name_famid'].isin(remove_regions) & bed_child['is_de_novo'], 'is_de_novo'] = False
-
-    end = time.time()
-    delta = end - start
-    print("Took %f seconds to process" % delta)
-
-    # 2. Filter by type
+    # 1. Filter by type
     # Keep any SV type that is not a DEL, DUP, or INS
     keep_other_sv = bed_child[((~bed_child['SVTYPE'].isin(['DEL', 'DUP', 'INS'])) & (bed_child['filter_flag'] != 'AF') & (bed_child['filter_flag'] != 'in_parent'))]['name_famid'].to_list()
 
-    # 3. Filter on DELs, DUPs, and INS
+    # 2. Filter on DELs, DUPs, and INS
     # Filter by size
     # Filter out if large CNVs have parents overlap
     verbose_print('Filtering out large CNVs with parents overlap', verbose)
@@ -769,7 +705,7 @@ def main():
     delta = end - start
     print("Took %f seconds to process" % delta)
 
-    # 4. Filter by quality
+    # 3. Filter by quality
     # Filter out if parents GQ is <= gq_min
     verbose_print('Filtering if parents GQ <= min_gq', verbose)
     start = time.time()
@@ -814,7 +750,7 @@ def main():
     delta = end - start
     print("Took %f seconds to process" % delta)
 
-    # 5. Clean up and remove duplicated CPX SV
+    # 4. Clean up and remove duplicated CPX SV
     # Keep SVs
     bed_child.loc[bed_child['name_famid'].isin(keep_other_sv), 'is_de_novo'] = True
     bed_child.loc[bed_child['name_famid'].isin(keep_other_sv), 'filter_flag'] = 'not_del_dup_ins'
