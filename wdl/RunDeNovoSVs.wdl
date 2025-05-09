@@ -124,6 +124,19 @@ workflow DeNovoSV {
           runtime_attr_override = runtime_override_subset_vcf_by_contig
       }
     }
+    Array[File] subset_vcfs = select_all(SubsetVcfByContig.subset_vcf)
+    Array[File] subset_vcf_indicies = select_all(SubsetVcfByContig.subset_vcf_index)
+
+    scatter (i in range(length(subset_vcfs))) {
+      call MatchVcfToContig as subset_match {
+        input:
+          vcf = subset_vcfs[i],
+          vcf_index = subset_vcf_indicies[i],
+          contigs = contigs,
+          sv_base_mini_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_match_vcf_to_contig
+      }
+    }
   }
 
   if (length(vcfs) > 1) {
@@ -139,9 +152,9 @@ workflow DeNovoSV {
     }
   }
 
-  Array[File] split_vcfs = select_all(select_first([SubsetVcfByContig.subset_vcf, MatchVcfToContig.matched_vcf]))
-  Array[File] split_vcf_indicies = select_all(select_first([SubsetVcfByContig.subset_vcf_index, MatchVcfToContig.matched_vcf_index]))
-  Array[String] kept_contigs = select_all(if defined(MatchVcfToContig.matched_contig) then select_first([MatchVcfToContig.matched_contig]) else contigs)
+  Array[File] split_vcfs = select_all(select_first([subset_match.matched_vcf, MatchVcfToContig.matched_vcf]))
+  Array[File] split_vcf_indicies = select_all(select_first([subset_match.matched_vcf_index, MatchVcfToContig.matched_vcf_index]))
+  Array[String] kept_contigs = select_all(select_first([subset_match.matched_contig, MatchVcfToContig.matched_contig]))
 
   # If family_ids file is given, subset the pedigree and VCFs to those families.
   if (defined(family_ids)) {
@@ -421,12 +434,18 @@ task SubsetVcfByContig {
 
     bcftools view --regions '~{contig}' --output-type z --output '~{contig_vcf}' \
       '~{vcf}'
-    bcftools index --tbi '~{contig_vcf}'
+
+    read -r nrec < <(bcftools head --header 0 --records 1 "${contig_vcf}" | wc -l)
+    if (( nrec == 0 )); then
+      rm "${contig_vcf}"
+    else
+      bcftools index --tbi '~{contig_vcf}'
+    fi
   >>>
 
   output {
-    File subset_vcf = contig_vcf
-    File subset_vcf_index = contig_vcf_index  
+    File? subset_vcf = contig_vcf
+    File? subset_vcf_index = contig_vcf_index  
   } 
 }
 
