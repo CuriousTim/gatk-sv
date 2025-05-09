@@ -446,7 +446,7 @@ task PreFilterVcf {
 
     bcftools view --output-type u --exclude 'SVTYPE ="BND" || SVTYPE = "CNV"' '~{vcf}' \
       | bcftools view --output '~{output_vcf}' --output-type z \
-          --include '(INFO/AF < ~{max_cohort_af} && INFO/gnomad_AF < ~{max_gnomad_af}) || ID = @gd_ovp_site_ids.list'
+          --include '(INFO/AF < ~{max_cohort_af} && (INFO/gnomad_v4.1_sv_AF = "." || INFO/gnomad_v4.1_sv_AF < ~{max_gnomad_af})) || ID = @gd_ovp_site_ids.list'
 
     read -r nrec < <(bcftools head --header 0 --records 1 "${output_vcf}" | wc -l)
     if (( nrec == 0 )); then
