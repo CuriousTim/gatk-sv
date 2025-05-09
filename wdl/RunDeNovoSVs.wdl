@@ -352,8 +352,6 @@ workflow DeNovoSV {
         nearby_insertion = nearby_insertion,
         coverage_cutoff = coverage_cutoff,
         gq_min = gq_min,
-        gnomad_col = gnomad_col,
-        alt_gnomad_col = alt_gnomad_col,
         variant_interpretation_docker = variant_interpretation_docker,
         runtime_override_denovo = runtime_override_denovo,
         runtime_override_vcf_to_bed = runtime_override_vcf_to_bed,
