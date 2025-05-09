@@ -409,7 +409,7 @@ def main():
     delta = end - start
     print("Took %f seconds to process" % delta)
 
-    # Sepparate variants in children and parents
+    # Separate variants in children and parents
     verbose_print('Sepparate variants in children and parents', verbose)
     start = time.time()
     bed_child = bed_split[bed_split['sample'].isin(children)]
@@ -423,27 +423,6 @@ def main():
     bed_child['name_famid'] = bed_child['name'] + "_" + bed_child['family_id'].astype(str).str.strip("[]")
     bed_parents['family_id'] = bed_parents.apply(lambda r: get_family_id(r, ped), axis=1)
     bed_parents['name_famid'] = bed_parents['name'] + "_" + bed_parents['family_id'].astype(str).str.strip("[]")
-
-    # Filter out by frequency - AF gnomad < 0.01
-    verbose_print('Filtering by frequency', verbose)
-    start = time.time()
-    bed_child["AF"] = pd.to_numeric(bed_child["AF"])
-    try:
-        bed_child[gnomad_col] = pd.to_numeric(bed_child[gnomad_col])
-        remove_freq = bed_child[~((((bed_child[gnomad_col] <= gnomad_af) & (bed_child['AF'] <= cohort_af)) |
-                                   ((bed_child[gnomad_col].isnull()) & (bed_child['AF'] <= cohort_af))))]['name_famid'].to_list()
-        bed_child['is_de_novo'] = pd.Series(True, index=bed_child.index).mask(bed_child['name_famid'].isin(remove_freq), False)
-        bed_child['filter_flag'] = pd.Series('de_novo', index=bed_child.index).mask(bed_child['name_famid'].isin(remove_freq), 'AF')
-
-    except KeyError:
-        bed_child[alt_gnomad_col] = pd.to_numeric(bed_child[alt_gnomad_col])
-        remove_freq = bed_child[~((((bed_child[alt_gnomad_col] <= gnomad_af) & (bed_child['AF'] <= cohort_af)) |
-                                   ((bed_child[alt_gnomad_col].isnull()) & (bed_child['AF'] <= cohort_af))))]['name_famid'].to_list()
-        bed_child['is_de_novo'] = pd.Series(True, index=bed_child.index).mask(bed_child['name_famid'].isin(remove_freq), False)
-        bed_child['filter_flag'] = pd.Series('de_novo', index=bed_child.index).mask(bed_child['name_famid'].isin(remove_freq), 'AF')
-    end = time.time()
-    delta = end - start
-    print("Took %f seconds to process" % delta)
 
     # Get counts within family and remove if SV in parents
     verbose_print('Keep variants in children only', verbose)
