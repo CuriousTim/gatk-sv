@@ -316,26 +316,19 @@ workflow DeNovoSV {
         raw_parents = ReformatPesrBed.reformatted_parents_bed[i],
         raw_depth_proband = ReformatDepthBed.reformatted_proband_bed[i],
         raw_depth_parents = ReformatDepthBed.reformatted_parents_bed[i],
-        genomic_disorder_regions = genomic_disorder_regions,
-        exclude_regions = exclude_regions,
         sample_batches = SubsetManifestsByBatches.subset_sample_manifest,
         batch_bincov_index = SubsetManifestsByBatches.subset_bincov_manifest,
         small_cnv_size = small_cnv_size,
         intermediate_cnv_size = intermediate_cnv_size,
         depth_only_size = depth_only_size,
         exclude_parent_cnv_size = exclude_parent_cnv_size,
-        gnomad_af = gnomad_af,
         parents_af = parents_af,
-        cohort_af = cohort_af,
         large_raw_overlap = large_raw_overlap,
         small_raw_overlap = small_raw_overlap,
         parents_overlap = parents_overlap,
-        blacklist_overlap = blacklist_overlap,
         nearby_insertion = nearby_insertion,
         coverage_cutoff = coverage_cutoff,
         gq_min = gq_min,
-        gnomad_col = gnomad_col,
-        alt_gnomad_col = alt_gnomad_col,
         variant_interpretation_docker = variant_interpretation_docker,
         runtime_override_denovo = runtime_override_denovo,
         runtime_override_vcf_to_bed = runtime_override_vcf_to_bed,
@@ -343,7 +336,7 @@ workflow DeNovoSV {
     }
   }
 
-  # Merges the per chromosome final de novo SV outputs
+  # Merges the per-chromosome final de novo SV outputs
   call MergeDenovoBedFiles {
     input:
       bed_files = GetDeNovo.per_chromosome_final_output_file,
