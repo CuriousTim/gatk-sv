@@ -363,8 +363,8 @@ def main():
     #########################
     # Exit out of bed file is empty
     if bed.size == 0:
-        bed.to_csv(path_or_buf=out_file, mode='a', index=False, sep='\t', header=True)
-        bed.to_csv(path_or_buf=de_novo_out_file, mode='a', index=False, sep='\t', header=True)
+        bed.to_csv(path_or_buf = out_file, mode = 'a', index = False, sep = '\t', header = True)
+        bed.to_csv(path_or_buf = de_novo_out_file, mode = 'a', index = False, sep = '\t', header = True)
         exit()
     # Get parents and children ids
     verbose_print('Getting parents/children/affected/unaffected IDs', verbose)
@@ -386,15 +386,6 @@ def main():
     bed['num_children'] = bed.apply(lambda r: get_count(r, children), axis=1)
     bed['num_parents'] = bed.apply(lambda r: get_count(r, parents), axis=1)
     bed['AF_parents'] = bed.apply(lambda r: get_parents_frequency(r, parents), axis=1)
-    end = time.time()
-    delta = end - start
-    print("Took %f seconds to process" % delta)
-
-    # Remove mCNVs, BNDs and SVs in sex chromosomes
-    start = time.time()
-    verbose_print('Remove BND and mCNV', verbose)
-    bed = bed[(~bed['svtype'].isin(['BND', 'CNV']))]
-    # bed = bed[(~bed['svtype'].isin(['BND', 'CNV']) & (~bed['chrom'].isin(["chrY", "chrX"])))]
     end = time.time()
     delta = end - start
     print("Took %f seconds to process" % delta)
