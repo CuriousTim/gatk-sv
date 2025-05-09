@@ -20,12 +20,18 @@ workflow DeNovoSV {
     # One family ID per line to call de novo in subset of families
     File? family_ids
 
+    # VCF filter parameters
+    Float max_cohort_af = 0.02
+    Float max_gnomad_af = 0.01
+    # Minimum fraction of SV overlapped by GD region
+    Float gd_overlap = 0.05
+    File gd_regions
+
     # Either a single VCF or an array of VCFs with each one containing a single
     # contig. In the case of a single VCF, it is expected that all the contigs
     # in the input contigs are present.
     Array[File] vcfs
     Array[File] vcf_indicies
-    File? genomic_disorder_regions
     File exclude_regions
 
     # Running parameters
@@ -76,6 +82,7 @@ workflow DeNovoSV {
 
     RuntimeAttr? runtime_override_make_manifests
     RuntimeAttr? runtime_override_subset_vcf_by_contig
+    RuntimeAttr? runtime_override_filter_vcf
     RuntimeAttr? runtime_override_match_vcf_to_contig
     RuntimeAttr? runtime_override_subset_ped
     RuntimeAttr? runtime_override_subset_vcf
@@ -125,36 +132,37 @@ workflow DeNovoSV {
       }
     }
     Array[File] subset_vcfs = select_all(SubsetVcfByContig.subset_vcf)
-    Array[File] subset_vcf_indicies = select_all(SubsetVcfByContig.subset_vcf_index)
+  }
 
-    scatter (i in range(length(subset_vcfs))) {
-      call MatchVcfToContig as subset_match {
-        input:
-          vcf = subset_vcfs[i],
-          vcf_index = subset_vcf_indicies[i],
-          contigs = contigs,
-          sv_base_mini_docker = sv_base_mini_docker,
-          runtime_attr_override = runtime_override_match_vcf_to_contig
-      }
+  Array[File] to_filter_vcfs = select_first([subset_vcfs, vcfs])
+  scatter (vcf in to_filter_vcfs) {
+    call PreFilterVcf {
+      input:
+        vcf = vcf,
+        max_cohort_af = max_cohort_af,
+        max_gnomad_af = max_gnomad_af,
+        gd_regions = gd_regions,
+        sv_base_mini_docker = sv_base_mini_docker,
+        runtime_attr_override = runtime_override_filter_vcf
+    }
+  }
+  Array[File] filtered_vcfs = select_all(PreFilterVcf.filtered_vcf)
+  Array[File] filtered_vcf_indicies = select_all(PreFilterVcf.filtered_vcf_index)
+
+  scatter (i in range(length(filtered_vcfs))) {
+    call MatchVcfToContig {
+      input:
+        vcf = filtered_vcfs[i],
+        vcf_index = filtered_vcf_indicies[i],
+        contigs = contigs,
+        sv_base_mini_docker = sv_base_mini_docker,
+        runtime_attr_override = runtime_override_match_vcf_to_contig
     }
   }
 
-  if (length(vcfs) > 1) {
-    scatter (i in range(length(vcfs))) {
-      call MatchVcfToContig {
-        input:
-          vcf = vcfs[i],
-          vcf_index = vcf_indicies[i],
-          contigs = contigs,
-          sv_base_mini_docker = sv_base_mini_docker,
-          runtime_attr_override = runtime_override_match_vcf_to_contig
-      }
-    }
-  }
-
-  Array[File] split_vcfs = select_all(select_first([subset_match.matched_vcf, MatchVcfToContig.matched_vcf]))
-  Array[File] split_vcf_indicies = select_all(select_first([subset_match.matched_vcf_index, MatchVcfToContig.matched_vcf_index]))
-  Array[String] kept_contigs = select_all(select_first([subset_match.matched_contig, MatchVcfToContig.matched_contig]))
+  Array[File] split_vcfs = select_all(MatchVcfToContig.matched_vcf)
+  Array[File] split_vcf_indicies = select_all(MatchVcfToContig.matched_vcf_index)
+  Array[String] kept_contigs = select_all(MatchVcfToContig.matched_contig)
 
   # If family_ids file is given, subset the pedigree and VCFs to those families.
   if (defined(family_ids)) {
@@ -329,7 +337,6 @@ workflow DeNovoSV {
         raw_parents = ReformatPesrBed.reformatted_parents_bed[i],
         raw_depth_proband = ReformatDepthBed.reformatted_proband_bed[i],
         raw_depth_parents = ReformatDepthBed.reformatted_parents_bed[i],
-        genomic_disorder_regions = genomic_disorder_regions,
         exclude_regions = exclude_regions,
         sample_batches = SubsetManifestsByBatches.subset_sample_manifest,
         batch_bincov_index = SubsetManifestsByBatches.subset_bincov_manifest,
@@ -337,9 +344,7 @@ workflow DeNovoSV {
         intermediate_cnv_size = intermediate_cnv_size,
         depth_only_size = depth_only_size,
         exclude_parent_cnv_size = exclude_parent_cnv_size,
-        gnomad_af = gnomad_af,
         parents_af = parents_af,
-        cohort_af = cohort_af,
         large_raw_overlap = large_raw_overlap,
         small_raw_overlap = small_raw_overlap,
         parents_overlap = parents_overlap,
@@ -395,6 +400,69 @@ workflow DeNovoSV {
 # TASK DEFINITIONS
 ###########################
 
+task PreFilterVcf {
+  input {
+    File vcf
+    Float max_cohort_af
+    Float max_gnomad_af
+    File gd_regions
+    Float gd_overlap
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float input_size = size([vcf, gd_regions], "GB")
+  RuntimeAttr default_attr = object {
+    mem_gb: 2,
+    cpu_cores: 1,
+    disk_gb: ceil(input_size * 2) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
+  }
+
+  String output_vcf = "filtered-${basename(vcf)}"
+  String output_vcf_index = "${output_vcf}.vcf.gz.tbi"
+
+  command <<<
+    set -euo pipefail
+
+    bcftools query --exclude 'SVTYPE = "BND" || SVTYPE = "CNV"' \
+      --format '%CHROM\t%POS0\t%END\t%ID\n' \
+      '~{vcf}' > sites.bed
+    bedtools intersect -a sites.tsv -b '~{gd_regions}' -wa -f ~{gd_overlap}' \
+      | cut -f 4 > gd_ovp_site_ids.list
+
+    bcftools view --output-type u --exclude 'SVTYPE ="BND" || SVTYPE = "CNV"' '~{vcf}' \
+      | bcftools view --output '~{output_vcf}' --output-type z \
+          --include '(INFO/AF < ~{max_cohort_af} && INFO/gnomad_AF < ~{max_gnomad_af}) || ID = @gd_ovp_site_ids.list'
+
+    read -r nrec < <(bcftools head --header 0 --records 1 "${output_vcf}" | wc -l)
+    if (( nrec == 0 )); then
+      echo 'filtering VCF removed all sites'
+      rm "${output_vcf}"
+    else
+      bcftools index --tbi '~{output_vcf}'
+    fi
+  >>>
+
+  output {
+    File? filtered_vcf = output_vcf
+    File? filtered_vcf_index = output_vcf_index
+  }
+}
+
 # Retrieve a single contig from a VCF.
 task SubsetVcfByContig {
   input {
@@ -427,7 +495,6 @@ task SubsetVcfByContig {
   }
 
   String contig_vcf = "${contig}.vcf.gz"
-  String contig_vcf_index = "${contig}.vcf.gz.tbi"
 
   command <<<
     set -euo pipefail
@@ -438,14 +505,11 @@ task SubsetVcfByContig {
     read -r nrec < <(bcftools head --header 0 --records 1 "${contig_vcf}" | wc -l)
     if (( nrec == 0 )); then
       rm "${contig_vcf}"
-    else
-      bcftools index --tbi '~{contig_vcf}'
     fi
   >>>
 
   output {
     File? subset_vcf = contig_vcf
-    File? subset_vcf_index = contig_vcf_index  
   } 
 }
 
