@@ -12,11 +12,8 @@ workflow DeNovoSVsScatter {
     File raw_parents
     File raw_depth_proband
     File raw_depth_parents
-    File exclude_regions
     File sample_batches
     File batch_bincov_index
-    File? genomic_disorder_regions
-    File exclude_regions
 
     # Parameters for denovo_svs.py with default values
     Int small_cnv_size = 1000
@@ -24,21 +21,15 @@ workflow DeNovoSVsScatter {
     Int depth_only_size = 10000
     Int exclude_parent_cnv_size = 10000000
     # Allele frequency
-    Float gnomad_af = 0.01
     Float parents_af = 0.05
-    Float cohort_af = 0.05
     # Overlap parameters
     Float large_raw_overlap = 0.5
     Float small_raw_overlap = 0.5
     Float parents_overlap = 0.5
-    Float blacklist_overlap = 0.5
     Int nearby_insertion = 100
     # SV quality (parents)
     Int coverage_cutoff = 10
     Float gq_min = 0
-    # Other
-    String gnomad_col = "gnomad_v4.1_sv_AF"
-    String alt_gnomad_col = "gnomad_v4.1_sv_AF"
 
     String variant_interpretation_docker
     String sv_pipeline_docker
@@ -70,8 +61,6 @@ workflow DeNovoSVsScatter {
         raw_parents = raw_parents,
         raw_depth_proband = raw_depth_proband,
         raw_depth_parents = raw_depth_parents,
-        genomic_disorder_regions = genomic_disorder_regions,
-        exclude_regions = exclude_regions,
         coverage_indices = coverage_index_files,
         sample_batches = sample_batches,
         batch_bincov_index = batch_bincov_index,
@@ -79,18 +68,13 @@ workflow DeNovoSVsScatter {
         intermediate_cnv_size = intermediate_cnv_size,
         depth_only_size = depth_only_size,
         exclude_parent_cnv_size = exclude_parent_cnv_size,
-        gnomad_af = gnomad_af,
         parents_af = parents_af,
-        cohort_af = cohort_af,
         large_raw_overlap = large_raw_overlap,
         small_raw_overlap = small_raw_overlap,
         parents_overlap = parents_overlap,
-        blacklist_overlap = blacklist_overlap,
         nearby_insertion = nearby_insertion,
         coverage_cutoff = coverage_cutoff,
         gq_min = gq_min,
-        gnomad_col = gnomad_col,
-        alt_gnomad_col = alt_gnomad_col,
         variant_interpretation_docker = variant_interpretation_docker,
         runtime_attr_override = runtime_override_denovo
     }
@@ -128,8 +112,6 @@ task RunDeNovo {
     File raw_parents
     File raw_depth_proband
     File raw_depth_parents
-    File? genomic_disorder_regions
-    File exclude_regions
     Array[File] coverage_indices
     File batch_bincov_index
     File sample_batches
@@ -139,18 +121,13 @@ task RunDeNovo {
     Int intermediate_cnv_size
     Int depth_only_size
     Int exclude_parent_cnv_size
-    Float gnomad_af
     Float parents_af
-    Float cohort_af
     Float large_raw_overlap
     Float small_raw_overlap
     Float parents_overlap
-    Float blacklist_overlap
     Int nearby_insertion
     Int coverage_cutoff
     Float gq_min
-    String gnomad_col
-    String alt_gnomad_col
 
     String variant_interpretation_docker
 
@@ -179,20 +156,15 @@ task RunDeNovo {
     printf "intermediate_cnv_size: '%d'\n" '~{intermediate_cnv_size}' >> config.py
     printf "depth_only_size: '%d'\n" '~{depth_only_size}' >> config.py
     printf "exclude_parent_cnv_size: '%d'\n" '~{exclude_parent_cnv_size}' >> config.py
-    printf "gnomad_AF: '%0.2f'\n" '~{gnomad_af}' >> config.py
     printf "parents_AF: '%0.2f'\n" '~{parents_af}' >> config.py
-    printf "cohort_AF: '%0.2f'\n" '~{cohort_af}' >> config.py
     printf "large_raw_overlap: '%0.1f'\n" '~{large_raw_overlap}' >> config.py
     printf "small_raw_overlap: '%0.1f'\n" '~{small_raw_overlap}' >> config.py
     printf "parents_overlap: '%0.1f'\n" '~{parents_overlap}' >> config.py
-    printf "blacklist_overlap: '%0.1f'\n" '~{blacklist_overlap}' >> config.py
     printf "nearby_insertion: '%d'\n" '~{nearby_insertion}' >> config.py
     printf "coverage_cutoff: '%d'\n" '~{coverage_cutoff}' >> config.py
     printf "gq_min: '%0.2f'\n" '~{gq_min}' >> config.py
-    printf "gnomad_col: '%s'\n" '~{gnomad_col}' >> config.py
-    printf "alt_gnomad_col: '%s'\n" '~{alt_gnomad_col}' >> config.py
 
-    # The MakeManifests tasks uses a batchID, sampleID column order while
+    # The MakeManifests task uses a batchID, sampleID column order while
     # denovo_svs.py expects the columns flipped.
     awk -F'\t' '{print $2"\t"$1}' '~{sample_batches}' > sample_batches_swapped.tsv
 
@@ -210,7 +182,6 @@ task RunDeNovo {
         --raw_depth_proband ~{raw_depth_proband} \
         --raw_depth_parents ~{raw_depth_parents} \
         --config config.py \
-        --exclude_regions ~{exclude_regions} \
         --coverage ~{batch_bincov_index} \
         --sample_batches sample_batches_swapped.tsv \
         --verbose True
