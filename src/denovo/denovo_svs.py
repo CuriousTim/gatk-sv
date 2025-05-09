@@ -295,7 +295,6 @@ def main():
     parser.add_argument('--raw_depth_proband', dest='raw_depth_proband', help='Directory with raw SV depth calls - output from m04')
     parser.add_argument('--raw_depth_parents', dest='raw_depth_parents', help='Directory with raw depth SV calls - output from m04')
     parser.add_argument('--config', dest='config', help='Config file')
-    parser.add_argument('--exclude_regions', dest='exclude_regions', help='File containing regions with known somatic mutations')
     parser.add_argument('--coverage', dest='coverage', help='File with batch in first column respective coverage file in second column')
     parser.add_argument('--sample_batches', dest='sample_batches', help='File with samples in first column and their respective batch in second column')
     parser.add_argument('--verbose', dest='verbose', help='Verbosity')
@@ -312,7 +311,6 @@ def main():
     raw_file_depth_parent = args.raw_depth_parents
     verbose = args.verbose
     config_file = args.config
-    exclude_regions = args.exclude_regions
     coverage = args.coverage
     batches = args.sample_batches
 
@@ -332,7 +330,6 @@ def main():
     large_raw_overlap = float(config['large_raw_overlap'])
     small_raw_overlap = float(config['small_raw_overlap'])
     parents_overlap = float(config['parents_overlap'])
-    blacklist_overlap = float(config['blacklist_overlap'])
     nearby_insertion = int(config['nearby_insertion'])
     # SV quality (parents)
     coverage_cutoff = int(config['coverage_cutoff'])
@@ -351,7 +348,6 @@ def main():
     raw_bed_parent = pd.read_csv(raw_file_parent, sep = '\t', names=raw_bed_colnames, header = None).replace(np.nan, '', regex = True)
     raw_bed_depth_child = pd.read_csv(raw_file_depth_proband, sep = '\t', names=raw_bed_colnames, header = None).replace(np.nan, '', regex = True)
     raw_bed_depth_parent = pd.read_csv(raw_file_depth_parent, sep = '\t', names=raw_bed_colnames, header = None).replace(np.nan, '', regex = True)
-    exclude_regions = pd.read_csv(exclude_regions, sep='\t').replace(np.nan, '', regex=True)
     bincov_colnames = ['batch', 'bincov', 'index']
     sample_batches_colnames = ['sample', 'batch']
     bincov = pd.read_csv(coverage, sep = '\t', names=bincov_colnames, header = None).replace(np.nan, '', regex = True)
@@ -658,35 +654,11 @@ def main():
     #############
     verbose_print('Filtering out calls', verbose)
 
-    # 1. Filter out calls in exclude regions
-    verbose_print('Filtering out calls in exclude regions', verbose)
-    start = time.time()
-    # Reformat exclude_regions to bedtool
-    exclue_regions_bt = convert_to_bedtool(exclude_regions, sort=True)
-    # convert bed_final to bedtool
-    cols_keep_exclude_regions = ['chrom', 'start', 'end', 'name', 'svtype', 'sample', 'name_famid']
-    if len(bed_child.index) > 0:
-        bed_child_bt = convert_to_bedtool(bed_child, cols_keep_exclude_regions, sort=True)
-        exclude_regions_intersect = bed_child_bt.coverage(exclue_regions_bt).to_dataframe(disable_auto_names = True, header = None)  # HB said to use bedtools coverage, -f and -F give the same SVs to be removed
-        if len(exclude_regions_intersect) != 0:
-            remove_regions = exclude_regions_intersect[exclude_regions_intersect[10] > blacklist_overlap][6].to_list()
-        else:
-            remove_regions = ['']
-    else:
-        remove_regions = ['']
-
-    bed_child.loc[bed_child['name_famid'].isin(remove_regions) & bed_child['is_de_novo'], 'filter_flag'] = 'in_blacklist_region'
-    bed_child.loc[bed_child['name_famid'].isin(remove_regions) & bed_child['is_de_novo'], 'is_de_novo'] = False
-
-    end = time.time()
-    delta = end - start
-    print("Took %f seconds to process" % delta)
-
-    # 2. Filter by type
+    # 1. Filter by type
     # Keep any SV type that is not a DEL, DUP, or INS
     keep_other_sv = bed_child[((~bed_child['SVTYPE'].isin(['DEL', 'DUP', 'INS'])) & (bed_child['filter_flag'] != 'AF') & (bed_child['filter_flag'] != 'in_parent'))]['name_famid'].to_list()
 
-    # 3. Filter on DELs, DUPs, and INS
+    # 2. Filter on DELs, DUPs, and INS
     # Filter by size
     # Filter out if large CNVs have parents overlap
     verbose_print('Filtering out large CNVs with parents overlap', verbose)
@@ -733,7 +705,7 @@ def main():
     delta = end - start
     print("Took %f seconds to process" % delta)
 
-    # 4. Filter by quality
+    # 3. Filter by quality
     # Filter out if parents GQ is <= gq_min
     verbose_print('Filtering if parents GQ <= min_gq', verbose)
     start = time.time()
@@ -778,7 +750,7 @@ def main():
     delta = end - start
     print("Took %f seconds to process" % delta)
 
-    # 5. Clean up and remove duplicated CPX SV
+    # 4. Clean up and remove duplicated CPX SV
     # Keep SVs
     bed_child.loc[bed_child['name_famid'].isin(keep_other_sv), 'is_de_novo'] = True
     bed_child.loc[bed_child['name_famid'].isin(keep_other_sv), 'filter_flag'] = 'not_del_dup_ins'
