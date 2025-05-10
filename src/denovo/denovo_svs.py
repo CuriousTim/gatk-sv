@@ -284,20 +284,38 @@ def get_insertion_intersection(bed, raw, nearby_insertion):
 def main():
 
     # Parse input arguments
-    parser = argparse.ArgumentParser(description='Parse arguments')
-    parser.add_argument('--bed', dest='bed', help='Input BED file')
-    parser.add_argument('--ped', dest='ped', help='Ped file')
-    parser.add_argument('--vcf', dest='vcf', help='VCF file')
-    parser.add_argument('--out', dest='out', help='Output file with all variants')
-    parser.add_argument('--out_de_novo', dest='out_de_novo', help='Output file with only de novo variants')
-    parser.add_argument('--raw_proband', dest='raw_proband', help='Directory with raw SV calls - output from m04')
-    parser.add_argument('--raw_parents', dest='raw_parents', help='Directory with raw SV calls - output from m04')
-    parser.add_argument('--raw_depth_proband', dest='raw_depth_proband', help='Directory with raw SV depth calls - output from m04')
-    parser.add_argument('--raw_depth_parents', dest='raw_depth_parents', help='Directory with raw depth SV calls - output from m04')
-    parser.add_argument('--config', dest='config', help='Config file')
-    parser.add_argument('--coverage', dest='coverage', help='File with batch in first column respective coverage file in second column')
-    parser.add_argument('--sample_batches', dest='sample_batches', help='File with samples in first column and their respective batch in second column')
-    parser.add_argument('--verbose', dest='verbose', help='Verbosity')
+    parser = argparse.ArgumentParser(description='de novo SV caller')
+    parser.add_argument('bed', help='Input BED file')
+    parser.add_argument('ped', help='Pedigree file')
+    parser.add_argument('vcf', help='VCF file')
+    parser.add_argument('out', help='Output file with all variants')
+    parser.add_argument('out_de_novo', help='Output file with only de novo variants')
+    parser.add_argument('raw_proband', help='Directory with proband raw non-depth SV calls')
+    parser.add_argument('raw_parents', help='Directory with parental raw non-depth SV calls')
+    parser.add_argument('raw_depth_proband', help='Directory with proband raw depth SV calls')
+    parser.add_argument('raw_depth_parents', help='Directory with parental raw depth SV calls')
+    parser.add_argument('coverage',
+                        help='File with batch in first column and respective coverage file in second column')
+    parser.add_argument('sample_batches',
+                        help='File with samples in first column and respective batch in second column')
+    parser.add_argument('--verbose', action='store_true', default=False, help='Verbosity')
+    parser.add_argument('--small-cnv-size', type=int, default=1000, help='Small CNV size max')
+    parser.add_argument('--med-cnv-size', type=int, default=5000, help='Intermediate CNV size max')
+    parser.add_argument('--depth-only-size', type=int, default=10000, help='Depth only size threshold')
+    parser.add_argument('--max-parent-cnv-size', type=int, default=10000000, help='Max parental CNV size')
+    parser.add_argument('--parent-af', type=float, default=0.05, help='Max parental AF')
+    parser.add_argument('--large-raw-overlap', type=float, default=0.5,
+                        help='Minimum overlap to match large CNV to raw call')
+    parser.add_argument('--small-raw-overlap', type=float, default=0.5,
+                        help='Minimum overlap to match small CNV to raw call')
+    parser.add_argument('--parents-overlap', type=float, default=0.5,
+                        help='Minimum overlap to match proband CNV to parental CNV')
+    parser.add_argument('--nearby-insertion', type=int, default=100,
+                        help='Minimum insertion site proximity to match INS calls')
+    parser.add_argument('--coverage-cutoff', type=int, default=10,
+                        help='Minimum parental sequencing coverage over SV region to make call')
+    parser.add_argument('--gq-min', type=int, default=0,
+                        help='Minimum parental GQ required to make call')
     args = parser.parse_args()
    
     bed_file = args.bed
@@ -309,31 +327,20 @@ def main():
     raw_file_parent = args.raw_parents
     raw_file_depth_proband = args.raw_depth_proband
     raw_file_depth_parent = args.raw_depth_parents
-    verbose = args.verbose
-    config_file = args.config
     coverage = args.coverage
     batches = args.sample_batches
 
-    
-    # Read in parameter values from the configuration file
-    with open(config_file, "r") as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
-
-    # Size parameters
-    small_cnv_size = int(config['small_cnv_size'])
-    intermediate_cnv_size = int(config['intermediate_cnv_size'])
-    depth_only_size = int(config['depth_only_size'])
-    exclude_parent_cnv_size = int(config['exclude_parent_cnv_size'])
-    # Allele frequency
-    parents_af = float(config['parents_AF'])
-    # Overlap parameters
-    large_raw_overlap = float(config['large_raw_overlap'])
-    small_raw_overlap = float(config['small_raw_overlap'])
-    parents_overlap = float(config['parents_overlap'])
-    nearby_insertion = int(config['nearby_insertion'])
-    # SV quality (parents)
-    coverage_cutoff = int(config['coverage_cutoff'])
-    gq_min = float(config['gq_min'])
+    small_cnv_size = args.small_cnv_size
+    intermediate_cnv_size = args.med_cnv_size
+    depth_only_size = args.depth_only_size
+    exclude_parent_cnv_size = args.max_parent_cnv_size
+    parents_af = args.parents_af
+    large_raw_overlap = args.large_raw_overlap
+    parents_overlap = args.parents_overlap
+    nearby_insertion = args.nearby_insertion
+    coverage_cutoff = args.coverage_cutoff
+    gq_min = args.gq_min
+    verbose = args.verbose
 
     
     # Read in files

@@ -151,18 +151,6 @@ task RunDeNovo {
   command <<<
     set -exuo pipefail
 
-    printf "small_cnv_size: '%d'\n" '~{small_cnv_size}' > config.py
-    printf "intermediate_cnv_size: '%d'\n" '~{intermediate_cnv_size}' >> config.py
-    printf "depth_only_size: '%d'\n" '~{depth_only_size}' >> config.py
-    printf "exclude_parent_cnv_size: '%d'\n" '~{exclude_parent_cnv_size}' >> config.py
-    printf "parents_AF: '%0.2f'\n" '~{parents_af}' >> config.py
-    printf "large_raw_overlap: '%0.1f'\n" '~{large_raw_overlap}' >> config.py
-    printf "small_raw_overlap: '%0.1f'\n" '~{small_raw_overlap}' >> config.py
-    printf "parents_overlap: '%0.1f'\n" '~{parents_overlap}' >> config.py
-    printf "nearby_insertion: '%d'\n" '~{nearby_insertion}' >> config.py
-    printf "coverage_cutoff: '%d'\n" '~{coverage_cutoff}' >> config.py
-    printf "gq_min: '%0.2f'\n" '~{gq_min}' >> config.py
-
     # The MakeManifests task uses a batchID, sampleID column order while
     # denovo_svs.py expects the columns flipped.
     awk -F'\t' '{print $2"\t"$1}' '~{sample_batches}' > sample_batches_swapped.tsv
@@ -171,19 +159,29 @@ task RunDeNovo {
 
     bcftools view ~{vcf} | grep -v ^## | bgzip -c > ~{basename}.noheader.vcf.gz
     python /src/denovo/denovo_svs.py \
-        --bed ~{bed_input} \
-        --ped ~{pedigree} \
-        --vcf ~{basename}.noheader.vcf.gz \
-        --out ~{basename}.annotation.bed \
-        --out_de_novo ~{basename}.denovo.bed \
-        --raw_proband ~{raw_proband} \
-        --raw_parents ~{raw_parents} \
-        --raw_depth_proband ~{raw_depth_proband} \
-        --raw_depth_parents ~{raw_depth_parents} \
-        --config config.py \
-        --coverage ~{batch_bincov_index} \
-        --sample_batches sample_batches_swapped.tsv \
-        --verbose True
+        ~{bed_input} \
+        ~{pedigree} \
+        ~{basename}.noheader.vcf.gz \
+        ~{basename}.annotation.bed \
+        ~{basename}.denovo.bed \
+        ~{raw_proband} \
+        ~{raw_parents} \
+        ~{raw_depth_proband} \
+        ~{raw_depth_parents} \
+        ~{batch_bincov_index} \
+        sample_batches_swapped.tsv \
+        --small-cnv-size ~{small_cnv_size} \
+        --med-cnv-size ~{intermediate_cnv_size} \
+        --depth-only-size ~{depth_only_size} \
+        --max-parent-cnv-size ~{exclude_parent_cnv_size} \
+        --parents-af ~{parents_af} \
+        --large-raw-overlap ~{large_raw_overlap} \
+        --small-raw-overlap ~{small_raw_overlap} \
+        --parents-overlap ~{parents_overlap} \
+        --nearby-insertion ~{nearby_insertion} \
+        --coverage-cutoff ~{coverage_cutoff} \
+        ---gq-min ~{gq_min} \
+        --verbose
 
     bgzip ~{basename}.denovo.bed
     bgzip ~{basename}.annotation.bed
