@@ -1113,9 +1113,14 @@ task CleanPed {
   command <<<
     set -exuo pipefail
 
+    # Filter the ped file to only retain rows that have a sample macth in the VCF
     awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && FNR==1{print; next} NR>FNR && ($2 in a)' \
       '~{vcf_samples}' '~{ped_file}' > filtered.ped
 
+    # Cleaning of pedigree file: 
+    # 1) Small families (≤ 3) are kept as is.
+    # 2) Large families (> 3) are split up into individual trio with FID changed to: FID_#. That means that parents will appear multiple times. 
+    # 3) Parent IDs are set to 0 id the parent does not have its own line in the original pedigree file.
     # The output file is hardcoded to "cleaned_ped.txt"
     Rscript /src/denovo/clean_ped.R filtered.ped
   >>>
