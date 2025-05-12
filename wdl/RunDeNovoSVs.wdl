@@ -441,6 +441,14 @@ task PreFilterVcf {
   command <<<
     set -euo pipefail
 
+    cat2() {
+      if [[ "$1" = *.gz ]]; then
+        zcat "$1"
+      else
+        cat "$1"
+      fi
+    }
+
     bcftools query --exclude 'SVTYPE = "BND" || SVTYPE = "CNV"' \
       --format '%CHROM\t%POS0\t%END\t%ID\t%INFO/AF\t%INFO/gnomad_v4.1_sv_AF\n' \
       '~{vcf}' \
@@ -453,8 +461,8 @@ task PreFilterVcf {
     : > blacklist_fail.list
     bl_paths='~{if defined(blacklists) then write_lines(select_first([blacklists])) else ""}'
     if [[ -n "${bl_paths:-}" ]]; then
-      cat "${bl_paths}" | xargs cat > blacklists.bed
-      bedtools intersect -a sites.bed -b blacklists.bed -wa -f ~{blacklist_overlap} \
+      while read -r f; do cat2 "$f"; done < "${bl_paths}" \
+        | bedtools intersect -a sites.bed -b stdin -wa -f ~{blacklist_overlap} \
         | cut -f 4 > blacklist_fail.list
     fi
 
