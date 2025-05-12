@@ -32,7 +32,9 @@ workflow DeNovoSV {
     # in the input contigs are present.
     Array[File] vcfs
     Array[File] vcf_indicies
-    File exclude_regions
+    # BED3 files with hg38 blacklist regions
+    Array[File]? blacklists
+    Float blacklist_overlap = 0.5
 
     # Running parameters
     String output_prefix
@@ -63,7 +65,6 @@ workflow DeNovoSV {
     Float? large_raw_overlap
     Float? small_raw_overlap
     Float? parents_overlap
-    Float? blacklist_overlap
     Int? nearby_insertion
     Int? coverage_cutoff
     Float? gq_min
@@ -141,6 +142,8 @@ workflow DeNovoSV {
         vcf = vcf,
         max_cohort_af = max_cohort_af,
         max_gnomad_af = max_gnomad_af,
+        blacklists = blacklists,
+        blacklist_overlap = blacklist_overlap,
         gd_regions = gd_regions,
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_filter_vcf
@@ -401,17 +404,20 @@ task PreFilterVcf {
     File vcf
     Float max_cohort_af
     Float max_gnomad_af
+    Array[File]? blacklists
+    Float blacklist_overlap
     File gd_regions
     Float gd_overlap
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
 
-  Float input_size = size([vcf, gd_regions], "GB")
+  Float vcf_size = size(vcf, "GB")
+  Float other_size = size(gd_regions, "GB") + (if defined(blacklists) then size(select_first([blacklists]), "GB") else 0)
   RuntimeAttr default_attr = object {
-    mem_gb: 2,
+    mem_gb: 4,
     cpu_cores: 1,
-    disk_gb: ceil(input_size * 2) + 16,
+    disk_gb: ceil(vcf_size * 2 + other_size) + 16,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
@@ -430,19 +436,37 @@ task PreFilterVcf {
 
   String output_vcf = "filtered-${basename(vcf)}"
   String output_vcf_index = "${output_vcf}.vcf.gz.tbi"
+  Array[File] bl = if defined(blacklists) then select_first([blacklists]) else []
 
   command <<<
     set -euo pipefail
 
     bcftools query --exclude 'SVTYPE = "BND" || SVTYPE = "CNV"' \
-      --format '%CHROM\t%POS0\t%END\t%ID\n' \
-      '~{vcf}' > sites.bed
-    bedtools intersect -a sites.tsv -b '~{gd_regions}' -wa -f ~{gd_overlap}' \
-      | cut -f 4 > gd_ovp_site_ids.list
+      --format '%CHROM\t%POS0\t%END\t%ID\t%INFO/AF\t%INFO/gnomad_v4.1_sv_AF\n' \
+      '~{vcf}' \
+      | LC_ALL=C sort -k1,1 -k2,2n > sites.tsv
+    awk -F'\t' '$5 > af || ($6 != "." && $6 > gaf){print $4}' \
+      af=~{max_cohort_af} gaf=~{max_gnomad_af} sites.tsv > af_fail.list
 
-    bcftools view --output-type u --exclude 'SVTYPE ="BND" || SVTYPE = "CNV"' '~{vcf}' \
-      | bcftools view --output '~{output_vcf}' --output-type z \
-          --include '(INFO/AF < ~{max_cohort_af} && (INFO/gnomad_v4.1_sv_AF = "." || INFO/gnomad_v4.1_sv_AF < ~{max_gnomad_af})) || ID = @gd_ovp_site_ids.list'
+    cut -f 1-4 sites.tsv > sites.bed
+    
+    : > blacklist_fail.list
+    bl_paths='~{if defined(blacklists) then write_lines(select_first([blacklists])) else ""}'
+    if [[ -n "${bl_paths:-}" ]]; then
+      cat "${bl_paths}" | xargs cat > blacklists.bed
+      bedtools intersect -a sites.bed -b blacklists.bed -wa -f ~{blacklist_overlap} \
+        | cut -f 4 > blacklist_fail.list
+    fi
+
+    bedtools intersect -a sites.bed -b '~{gd_regions}' -wa -f ~{gd_overlap}' \
+      | cut -f 4 > gd_pass.list
+
+    awk 'FILENAME==ARGV[1]{a[$1]} FILENAME!=ARGV[1] && !($1 in a){print}' \
+      gd_pass.list af_fail.list blacklist_fail.list > exclude.list
+
+    bcftools view --output-type z --output '~{output_vcf}' \
+      --exclude 'SVTYPE ="BND" || SVTYPE = "CNV" || ID = @exclude.list' \
+      '~{vcf}'
 
     read -r nrec < <(bcftools head --header 0 --records 1 "${output_vcf}" | wc -l)
     if (( nrec == 0 )); then
