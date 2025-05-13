@@ -466,7 +466,7 @@ task PreFilterVcf {
         | cut -f 4 > blacklist_fail.list
     fi
 
-    bedtools intersect -a sites.bed -b '~{gd_regions}' -wa -f ~{gd_overlap}' \
+    bedtools intersect -a sites.bed -b '~{gd_regions}' -wa -f '~{gd_overlap}' \
       | cut -f 4 > gd_pass.list
 
     awk 'FILENAME==ARGV[1]{a[$1]} FILENAME!=ARGV[1] && !($1 in a){print}' \
