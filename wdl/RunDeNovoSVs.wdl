@@ -435,7 +435,7 @@ task PreFilterVcf {
   }
 
   String output_vcf = "filtered-${basename(vcf)}"
-  String output_vcf_index = "${output_vcf}.vcf.gz.tbi"
+  String output_vcf_index = "${output_vcf}.tbi"
   Array[File] bl = if defined(blacklists) then select_first([blacklists]) else []
 
   command <<<
