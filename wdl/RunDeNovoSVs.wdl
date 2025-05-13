@@ -476,10 +476,10 @@ task PreFilterVcf {
       --exclude 'SVTYPE ="BND" || SVTYPE = "CNV" || ID = @exclude.list' \
       '~{vcf}'
 
-    read -r nrec < <(bcftools head --header 0 --records 1 "${output_vcf}" | wc -l)
+    read -r nrec < <(bcftools head --header 0 --records 1 "~{output_vcf}" | wc -l)
     if (( nrec == 0 )); then
       echo 'filtering VCF removed all sites'
-      rm "${output_vcf}"
+      rm "~{output_vcf}"
     else
       bcftools index --tbi '~{output_vcf}'
     fi
