@@ -180,7 +180,7 @@ task RunDeNovo {
         --parents-overlap ~{parents_overlap} \
         --nearby-insertion ~{nearby_insertion} \
         --coverage-cutoff ~{coverage_cutoff} \
-        ---gq-min ~{gq_min} \
+        --gq-min ~{gq_min} \
         --verbose
 
     bgzip ~{basename}.denovo.bed

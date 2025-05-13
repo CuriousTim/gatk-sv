@@ -303,7 +303,7 @@ def main():
     parser.add_argument('--med-cnv-size', type=int, default=5000, help='Intermediate CNV size max')
     parser.add_argument('--depth-only-size', type=int, default=10000, help='Depth only size threshold')
     parser.add_argument('--max-parent-cnv-size', type=int, default=10000000, help='Max parental CNV size')
-    parser.add_argument('--parent-af', type=float, default=0.05, help='Max parental AF')
+    parser.add_argument('--parents-af', type=float, default=0.05, help='Max parental AF')
     parser.add_argument('--large-raw-overlap', type=float, default=0.5,
                         help='Minimum overlap to match large CNV to raw call')
     parser.add_argument('--small-raw-overlap', type=float, default=0.5,
