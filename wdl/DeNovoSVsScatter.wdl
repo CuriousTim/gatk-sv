@@ -29,7 +29,7 @@ workflow DeNovoSVsScatter {
     Int nearby_insertion = 100
     # SV quality (parents)
     Int coverage_cutoff = 10
-    Float gq_min = 0
+    Int gq_min = 0
 
     String variant_interpretation_docker
     String sv_pipeline_docker
@@ -127,7 +127,7 @@ task RunDeNovo {
     Float parents_overlap
     Int nearby_insertion
     Int coverage_cutoff
-    Float gq_min
+    Int gq_min
 
     String variant_interpretation_docker
 
