@@ -430,10 +430,7 @@ def main():
     # Get counts within family and remove if SV in parents
     verbose_print('Keep variants in children only', verbose)
     start = time.time()
-    try:
-        parents_sc = int(config['parents_SC'])
-    except KeyError:
-        parents_sc = len(parents)
+    parents_sc = len(parents)
     if len(bed_child.index) > 0:  # Otherwise, if nothing in bed_child will get an error
         bed_child['num_parents_family'] = bed_child.apply(lambda r: get_family_count(r, ped), axis=1)
 
