@@ -67,7 +67,7 @@ workflow DeNovoSV {
     Float? parents_overlap
     Int? nearby_insertion
     Int? coverage_cutoff
-    Float? gq_min
+    Int? gq_min
     String? gnomad_col
     String? alt_gnomad_col
 
