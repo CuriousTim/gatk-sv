@@ -334,6 +334,7 @@ def main():
     depth_only_size = args.depth_only_size
     exclude_parent_cnv_size = args.max_parent_cnv_size
     parents_af = args.parents_af
+    small_raw_overlap = args.small_raw_overlap
     large_raw_overlap = args.large_raw_overlap
     parents_overlap = args.parents_overlap
     nearby_insertion = args.nearby_insertion
