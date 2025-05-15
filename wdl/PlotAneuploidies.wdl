@@ -125,7 +125,7 @@ task GroupSamples {
         }
 
         if (!(q in e)) {
-          e[q] = sprintf("%06d", i++)
+          e[q] = sprintf("groups/%06d", i++)
           print bincovs[q] > e[q]
         }
         print $1 > e[q]
