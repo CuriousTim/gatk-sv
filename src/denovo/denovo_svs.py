@@ -426,6 +426,7 @@ def main():
     bed_child['name_famid'] = bed_child['name'] + "_" + bed_child['family_id'].astype(str).str.strip("[]")
     bed_parents['family_id'] = bed_parents.apply(lambda r: get_family_id(r, ped), axis=1)
     bed_parents['name_famid'] = bed_parents['name'] + "_" + bed_parents['family_id'].astype(str).str.strip("[]")
+    bed_child['is_de_novo'] = pd.Series(True, index=bed_child.index)
 
     # Get counts within family and remove if SV in parents
     verbose_print('Keep variants in children only', verbose)
