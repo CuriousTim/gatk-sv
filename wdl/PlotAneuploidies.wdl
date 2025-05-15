@@ -38,7 +38,7 @@ workflow PlotAneuploidies {
   }
 
   scatter (i in range(length(GroupSamples.groups))) {
-    File bincov = read_lines(GroupSamples.groups[i])[1]
+    File bincov = read_lines(GroupSamples.groups[i])[0]
     File batch_name = "batch_" + i
     call pe.BuildPloidyMatrix as PloidyMatrix {
       input:
