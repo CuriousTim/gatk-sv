@@ -7,7 +7,6 @@ SV de novo filtering script
 ###########################
 
 import argparse
-import yaml
 import numpy as np
 import pandas as pd
 import pybedtools
