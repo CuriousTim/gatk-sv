@@ -109,14 +109,14 @@ task GroupSamples {
 
     mkdir groups
     batch_ids='~{write_lines(batch_ids)}'
-    bincov_matricies='~{write_lines(bincov_matrices)}'
+    bincov_matrices='~{write_lines(bincov_matrices)}'
     batch_n=$(cat "${batch_ids}" | wc -l)
-    bincov_n=$(cat "${bincov_matrix}" | wc -l)
+    bincov_n=$(cat "${bincov_matrices}" | wc -l)
     if (( batch_n != bincov_n )); then
       printf 'unequal number of batches and bincov matrices (%d vs %d)\n' "${batch_n}" "${bincov_n}" >&2
       exit 1
     fi
-    paste "${batch_ids}" "${bincov_matricies}" > bincovs.tsv
+    paste "${batch_ids}" "${bincov_matrices}" > bincovs.tsv
 
     awk -F'\t' '
       FILENAME == ARGV[1] {bincovs[$1] = $2}
