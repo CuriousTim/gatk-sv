@@ -458,16 +458,19 @@ task PreFilterVcf {
 
     cut -f 1-4 sites.tsv > sites.bed
     
+    # Use coverage instead of intersect
     : > blacklist_fail.list
     bl_paths='~{if defined(blacklists) then write_lines(select_first([blacklists])) else ""}'
     if [[ -n "${bl_paths:-}" ]]; then
       while read -r f; do cat2 "$f"; done < "${bl_paths}" \
-        | bedtools intersect -a sites.bed -b stdin -wa -f ~{blacklist_overlap} \
-        | cut -f 4 > blacklist_fail.list
+        | LC_ALL=C sort -k1,1 -k2,2n > bl_merged.bed
+
+        bedtools coverage -a sites.bed -b bl_merged.bed -sorted \
+        | awk -F'\t' '$8 >= ~{blacklist_overlap} {print $4}' > blacklist_fail.list
     fi
 
-    bedtools intersect -a sites.bed -b '~{gd_regions}' -wa -f '~{gd_overlap}' \
-      | cut -f 4 > gd_pass.list
+    bedtools coverage -a sites.bed -b '~{gd_regions}' \
+      | awk -F'\t' '$8 >= ~{gd_overlap} {print $4}' > gd_pass.list
 
     awk 'FILENAME==ARGV[1]{a[$1]} FILENAME!=ARGV[1] && !($1 in a){print}' \
       gd_pass.list af_fail.list blacklist_fail.list > exclude.list
