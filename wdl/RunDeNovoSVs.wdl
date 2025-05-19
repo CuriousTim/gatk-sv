@@ -134,6 +134,7 @@ workflow DeNovoSV {
       ped = pedigree,
       fams = family_ids,
       vcf = vcfs[(length(vcfs) - 1)],
+      batch_manifest = MakeManifests.sample_manifest,
       sv_base_mini_docker = sv_base_mini_docker,
       runtime_attr_override = runtime_override_subset_samples
   }
