@@ -7,7 +7,6 @@ version 1.0
 import "Structs.wdl"
 import "TasksMakeCohortVcf.wdl" as miniTasks
 import "DeNovoSVsScatter.wdl" as runDeNovo
-import "Utils.wdl" as util
 
 ###########################
 # MAIN WORKFLOW DEFINITION
@@ -29,7 +28,8 @@ workflow DeNovoSV {
 
     # Either a single VCF or an array of VCFs with each one containing a single
     # contig. In the case of a single VCF, it is expected that all the contigs
-    # in the input contigs are present.
+    # in the input contigs are present. In the case of multiple VCFs, all VCFs
+    # must contain the exact same set of samples.
     Array[File] vcfs
     Array[File] vcf_indicies
     # BED3 files with hg38 blacklist regions
@@ -85,18 +85,12 @@ workflow DeNovoSV {
     RuntimeAttr? runtime_override_subset_vcf_by_contig
     RuntimeAttr? runtime_override_filter_vcf
     RuntimeAttr? runtime_override_match_vcf_to_contig
-    RuntimeAttr? runtime_override_subset_ped
+    RuntimeAttr? runtime_override_subset_samples
     RuntimeAttr? runtime_override_subset_vcf
-    RuntimeAttr? runtime_override_samples_from_vcf
-    RuntimeAttr? runtime_override_get_sample_batches
     RuntimeAttr? runtime_override_subset_manifests
-    RuntimeAttr? runtime_override_merge_sample_lists
-    RuntimeAttr? runtime_override_clean_ped
     RuntimeAttr? runtime_override_clustered_vcf_to_bed
     RuntimeAttr? runtime_override_merge_clustered_bed
-    RuntimeAttr? runtime_override_contig_from_bed
     RuntimeAttr? runtime_override_reformat_bed
-    RuntimeAttr? runtime_override_subset_vcf
     RuntimeAttr? runtime_override_shard_vcf
     RuntimeAttr? runtime_override_denovo
     RuntimeAttr? runtime_override_denovo_merge_bed
@@ -135,6 +129,15 @@ workflow DeNovoSV {
     Array[File] subset_vcfs = select_all(SubsetVcfByContig.subset_vcf)
   }
 
+  call SubsetSamples {
+    input:
+      ped = pedigree,
+      fams = family_ids,
+      vcf = vcfs[(length(vcfs) - 1)],
+      sv_base_mini_docker = sv_base_mini_docker,
+      runtime_attr_override = runtime_override_subset_samples
+  }
+
   Array[File] to_filter_vcfs = select_first([subset_vcfs, vcfs])
   scatter (vcf in to_filter_vcfs) {
     call PreFilterVcf {
@@ -145,10 +148,12 @@ workflow DeNovoSV {
         blacklists = blacklists,
         blacklist_overlap = blacklist_overlap,
         gd_regions = gd_regions,
+        samples = SubsetSamples.sample_subset,
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_filter_vcf
     }
   }
+
   Array[File] filtered_vcfs = select_all(PreFilterVcf.filtered_vcf)
   Array[File] filtered_vcf_indicies = select_all(PreFilterVcf.filtered_vcf_index)
 
@@ -167,150 +172,74 @@ workflow DeNovoSV {
   Array[File] split_vcf_indicies = select_all(MatchVcfToContig.matched_vcf_index)
   Array[String] kept_contigs = select_all(MatchVcfToContig.matched_contig)
 
-  # If family_ids file is given, subset the pedigree and VCFs to those families.
-  if (defined(family_ids)) {
-    call SubsetPedByFams {
-      input:
-        ped = pedigree,
-        fams = select_first([family_ids]),
-        linux_docker = linux_docker,
-        runtime_attr_override = runtime_override_subset_ped
-    }
-
-    scatter (i in range(length(split_vcfs))) {
-      call util.SubsetVcfBySamplesList as SubsetVcfWithPed {
-        input:
-          vcf = split_vcfs[i],
-          vcf_idx = split_vcf_indicies[i],
-          list_of_samples = SubsetPedByFams.samples,
-          outfile_name = "${kept_contigs[i]}-subset.vcf.gz",
-          sv_base_mini_docker = sv_base_mini_docker,
-          runtime_attr_override = runtime_override_subset_vcf
-      }
-    }
-  }
-
-  File working_ped = select_first([SubsetPedByFams.subset_ped, pedigree])
-  Array[File] final_vcfs = select_first([SubsetVcfWithPed.vcf_subset, split_vcfs])
-  Array[File] final_vcf_indicies = select_first([SubsetVcfWithPed.vcf_subset_index, split_vcf_indicies])
-
-  scatter (i in range(length(final_vcfs))) {
-    call util.GetSampleIdsFromVcf {
-      input:
-        vcf = final_vcfs[i],
-        sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_samples_from_vcf
-    }
-  }
-
-  call MergeSampleLists {
-    input:
-      samples = GetSampleIdsFromVcf.out_file,
-      linux_docker = linux_docker,
-      runtime_attr_override = runtime_override_merge_sample_lists
-  }
-
-  call GetSampleBatches {
-    input:
-      samples = MergeSampleLists.merged_samples,
-      sample_batch_map = MakeManifests.sample_manifest,
-      linux_docker = linux_docker,
-      runtime_attr_override = runtime_override_get_sample_batches
-  }
-
   call SubsetManifestsByBatches {
     input:
       pesr_manifest = MakeManifests.pesr_manifest,
       depth_manifest = MakeManifests.depth_manifest,
       sample_manifest = MakeManifests.sample_manifest,
       bincov_manifest = MakeManifests.bincov_manifest,
-      batches = GetSampleBatches.batches,
+      batches = SubsetSamples.batch_subset,
       linux_docker = linux_docker,
       runtime_attr_override = runtime_override_subset_manifests
-  }
-
-  # Makes a ped file of singletons, duos, and trios for input into the de novo script (only including families of interest)
-  call CleanPed {
-    input:
-      ped_file = working_ped,
-      vcf_samples = MergeSampleLists.merged_samples,
-      variant_interpretation_docker = variant_interpretation_docker,
-      runtime_attr_override = runtime_override_clean_ped
   }
 
   Array[String] all_pesr_vcfs = transpose(read_tsv(SubsetManifestsByBatches.subset_pesr_manifest))[1]
   Array[String] all_depth_vcfs = transpose(read_tsv(SubsetManifestsByBatches.subset_depth_manifest))[1]
   scatter (vcf in all_pesr_vcfs) {
-    call util.VcfToBed as PesrVcfToBed {
+    call BatchVcfToBed as PesrVcfToBed {
       input:
-        vcf_file = vcf,
-        args = "--info SVTYPE",
-        variant_interpretation_docker = sv_pipeline_docker,
+        vcf = vcf,
+        samples = SubsetSamples.sample_subset,
+        sv_pipeline_docker = sv_pipeline_docker,
         runtime_attr_override = runtime_override_clustered_vcf_to_bed
     }
   }
 
   scatter (vcf in all_depth_vcfs) {
-    call util.VcfToBed as DepthVcfToBed {
+    call BatchVcfToBed as DepthVcfToBed {
       input:
-        vcf_file = vcf,
-        args = "--info SVTYPE",
-        variant_interpretation_docker = sv_pipeline_docker,
+        vcf = vcf,
+        samples = SubsetSamples.sample_subset,
+        sv_pipeline_docker = sv_pipeline_docker,
         runtime_attr_override = runtime_override_clustered_vcf_to_bed
     }
   }
 
-  # The VcfToBed task outputs a bgzip compressed file, but the format allows
-  # compressed files to be concatenated.
-  call miniTasks.CatUncompressedFiles as MergePesrBed {
+  # The BatchVcfToBed task outputs a bgzip compressed file, but the format
+  # allows compressed files to be concatenated.
+  call MergeBatchBedsToContigs as MergePesrBed {
     input:
-      shards = PesrVcfToBed.bed_output,
-      outfile_name = "merged_pesr.bed.gz",
+      beds = PesrVcfToBed.bed,
+      contigs = kept_contigs,
       sv_base_mini_docker = sv_base_mini_docker,
       runtime_attr_override = runtime_override_merge_clustered_bed
   }
 
-  call miniTasks.CatUncompressedFiles as MergeDepthBed {
+  call MergeBatchBedsToContigs as MergeDepthBed {
     input:
-      shards = DepthVcfToBed.bed_output,
-      outfile_name = "merged_depth.bed.gz",
+      beds = DepthVcfToBed.bed,
+      contigs = kept_contigs,
       sv_base_mini_docker = sv_base_mini_docker,
       runtime_attr_override = runtime_override_merge_clustered_bed
   }
 
   scatter (contig in kept_contigs) {
-    call GetContigFromBed as GetContigFromPesrBed {
-      input:
-        bed = MergePesrBed.outfile,
-        contig = contig,
-        sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_contig_from_bed
-    }
-
-    call GetContigFromBed as GetContigFromDepthBed {
-      input:
-        bed = MergeDepthBed.outfile,
-        contig = contig,
-        sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_contig_from_bed
-    }
-
     call ReformatContigBed as ReformatPesrBed {
       input:
-        bed = GetContigFromPesrBed.contig_bed,
+        bed = MergePesrBed.contig_beds[contig],
         contig = contig,
         type = "",
-        pedigree = working_ped,
+        pedigree = SubsetSamples.ped_subset,
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_reformat_bed
     }
 
     call ReformatContigBed as ReformatDepthBed {
       input:
-        bed = GetContigFromDepthBed.contig_bed,
+        bed = MergeDepthBed.contig_beds[contig],
         contig = contig,
         type = "depth",
-        pedigree = working_ped,
+        pedigree = SubsetSamples.ped_subset,
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_reformat_bed
     }
@@ -318,12 +247,12 @@ workflow DeNovoSV {
 
   # Scatter the following tasks across chromosomes: miniTasks.ScatterVCf,
   # and runDeNovo.DeNovoSVsScatter.
-  scatter (i in range(length(final_vcfs))) {
+  scatter (i in range(length(split_vcfs))) {
     # Shards vcf
     call miniTasks.ScatterVcf as ScatterVcf {
       input:
-        vcf = final_vcfs[i],
-        vcf_index = final_vcf_indicies[i],
+        vcf = split_vcfs[i],
+        vcf_index = split_vcf_indicies[i],
         prefix = output_prefix,
         records_per_shard = records_per_shard,
         sv_pipeline_docker = sv_pipeline_docker,
@@ -333,7 +262,7 @@ workflow DeNovoSV {
     # Runs the de novo calling python script on each shard and outputs a per chromosome list of de novo SVs
     call runDeNovo.DeNovoSVsScatter as GetDeNovo {
       input:
-        pedigree = CleanPed.cleaned_ped,
+        pedigree = SubsetSamples.ped_subset,
         vcfs = ScatterVcf.shards,
         chromosome = kept_contigs[i],
         raw_proband = ReformatPesrBed.reformatted_proband_bed[i],
@@ -381,13 +310,13 @@ workflow DeNovoSV {
   call CreatePlots {
     input:
       bed_file = CallOutliers.final_denovo_nonOutliers_output,
-      ped_file = working_ped,
+      ped_file = SubsetSamples.ped_subset,
       variant_interpretation_docker=variant_interpretation_docker,
       runtime_attr_override = runtime_override_create_plots
   }
 
   output {
-    File cleaned_ped = CleanPed.cleaned_ped
+    File cleaned_ped = SubsetSamples.ped_subset
     File final_denovo_nonOutliers = CallOutliers.final_denovo_nonOutliers_output
     File final_denovo_outliers = CallOutliers.final_denovo_outliers_output
     File final_denovo_nonOutliers_plots = CreatePlots.output_plots
@@ -399,6 +328,16 @@ workflow DeNovoSV {
 # TASK DEFINITIONS
 ###########################
 
+# Filter the input VCF(s).
+# 1. Remove all sites that:
+#    a. Are BND or CNV
+#    b. Have an allele frequency or gnomAD allele frequency greater than the
+#       input thresholds
+#    c. Are covered by at least 50% by blacklist regions
+#    d. Not covered by at least 50% by genomic disorder regions (any site
+#       meeting this criteria will be kept, even if it would be
+#       otherwise excluded by the previous criteria)
+# 2. Remove all samples from the VCF that are not in the input samples file
 task PreFilterVcf {
   input {
     File vcf
@@ -408,12 +347,13 @@ task PreFilterVcf {
     Float blacklist_overlap
     File gd_regions
     Float gd_overlap
+    File samples
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
 
   Float vcf_size = size(vcf, "GB")
-  Float other_size = size(gd_regions, "GB") + (if defined(blacklists) then size(select_first([blacklists]), "GB") else 0)
+  Float other_size = size([gd_regions, samples], "GB") + (if defined(blacklists) then size(select_first([blacklists]), "GB") else 0)
   RuntimeAttr default_attr = object {
     mem_gb: 4,
     cpu_cores: 1,
@@ -475,11 +415,16 @@ task PreFilterVcf {
     awk 'FILENAME==ARGV[1]{a[$1]} FILENAME!=ARGV[1] && !($1 in a){print}' \
       gd_pass.list af_fail.list blacklist_fail.list > exclude.list
 
-    bcftools view --output-type z --output '~{output_vcf}' \
-      --exclude 'SVTYPE ="BND" || SVTYPE = "CNV" || ID = @exclude.list' \
-      '~{vcf}'
+    # we do not want to force samples because in the context of this workflow, the
+    # list of samples should only contain samples that are present in the last VCF
+    # in the array of input VCFs so if any other VCF does not have the exact same
+    # set of samples, there is an error
+    bcftools view --exclude 'SVTYPE ="BND" || SVTYPE = "CNV" || ID = @exclude.list' \
+      --output-type u '~{vcf}' \
+      | bcftools view --output-type z --output '~{output_vcf}' \
+        --no-update --samples-file '~{samples}'
 
-    read -r nrec < <(bcftools head --header 0 --records 1 "~{output_vcf}" | wc -l)
+    bcftools head --header 0 --records 1 "~{output_vcf}" | wc -l | read -r nrec
     if (( nrec == 0 )); then
       echo 'filtering VCF removed all sites'
       rm "~{output_vcf}"
@@ -620,6 +565,75 @@ task MatchVcfToContig {
     File? matched_vcf = vcf_bn
     File? matched_vcf_index = vcf_index_bn
     String? matched_contig = if read_string("matched_contig.list") == "" then null else read_string("matched_contig.list")
+  }
+}
+
+# Subset the pedigree, samples and batches so they are all synchronized.
+# 1. Subset the pedigree to trios.
+# 2. Subset the pedigree by families, if present.
+# 3. Subset the pedigree to trios for which all members are in the VCF.
+# 4. Subset the samples in the VCF to samples that are also in the pedigree.
+# 5. Subset the batch manifest to batches with samples in the list from 4.
+task SubsetSamples {
+  input {
+    File ped
+    File? fams
+    File vcf
+    File batch_manifest
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float input_size = size(select_all([ped, fams, vcf, batch_manifest]), "GB")
+  RuntimeAttr default_attr = object {
+    mem_gb: 2,
+    cpu_cores: 1,
+    disk_gb: ceil(input_size) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
+  }
+
+  command <<<
+    set -euo pipefail
+
+    fam_ids='~{if defined(fams) then fams else ""}'
+    awk -F'\t' '$2 && $3 && $4' > trios.ped
+    ped=trios.ped
+    
+    if [[ -n "${fam_ids:-}" && -s "${fam_ids}" ]]; then
+      awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a)' "${fam_ids}" "${ped}" > fam_subset.ped
+      ped=fam_subset.ped
+    fi
+
+    bcftools query --list-samples '~{vcf}' | LC_ALL=C sort > vcf_samples.list
+    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a) && ($2 in a) && ($3 in a)' \
+      vcf_samples.list "${ped}" > subset.ped
+
+    awk -F'\t' '{print $1; print $2; print $3}' subset.ped \
+      | LC_ALL=C sort > ped_samples.list
+
+    LC_ALL=C comm -12 ped_samples.list vcf_samples.list > sample_subset.list
+
+    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($2 in a){print $1}' \
+      sample_subset.list '~{batch_manifest}' > batch_subset.list
+  >>>
+
+  output {
+    File ped_subset = "subset.ped"
+    File sample_subset = "sample_subset.list"
+    File batch_subset = "batch_subset.list"
   }
 }
 
@@ -773,65 +787,19 @@ task SubsetManifestsByBatches {
   }
 }
 
-# Subset pedigree by family IDs.
-task SubsetPedByFams {
+task BatchVcfToBed {
   input {
-    File ped
-    File fams
-    String linux_docker
-    RuntimeAttr? runtime_attr_override
-  }
-
-  Float input_size = size([ped, fams], "GB")
-  RuntimeAttr default_attr = object {
-    mem_gb: 1,
-    cpu_cores: 1,
-    disk_gb: ceil(input_size) + 16,
-    boot_disk_gb: 8,
-    preemptible_tries: 3,
-    max_retries: 1
-  }
-  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-  runtime {
-    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
-    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: linux_docker
-  }
-
-  command <<<
-    set -euo pipefail
-
-    # The pedigree format required by the pipeline has a header
-    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && FNR==1{print; next} NR>FNR && ($1 in a)' \
-      '~{fams}' '~{ped}' > subset.ped
-    awk 'FNR>1' | cut -f 2 | LC_ALL=C sort -u > subset_samples.list
-  >>>
-
-  output {
-    File subset_ped = "subset.ped"
-    File samples = "subset_samples.list"
-  }
-}
-
-# Get the batches associated with the given samples.
-task GetSampleBatches {
-  input {
+    File vcf
     File samples
-    File sample_batch_map
-    String linux_docker
+    String sv_pipeline_docker
     RuntimeAttr? runtime_attr_override
   }
 
-  Float input_size = size(samples, "GB") + size(sample_batch_map, "GB")
+  Float input_size = size([vcf, samples], "GB")
   RuntimeAttr default_attr = object {
     mem_gb: 1,
     cpu_cores: 1,
-    disk_gb: ceil(input_size) + 16,
+    disk_gb: ceil(input_size * 2) + 16,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1
@@ -845,35 +813,37 @@ task GetSampleBatches {
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
     preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
     maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: linux_docker
+    docker: sv_pipeline_docker
   }
 
+  File vcf_basename = basename(vcf, ".vcf.gz")
   command <<<
     set -euo pipefail
 
-    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($2 in a){print $1}' \
-      '~{samples}' '~{sample_batch_map}' \
-      | LC_ALL=C sort -u > batches.list
+    bcftools view --output-type z --output temp.vcf.gz --no-update \
+      --force-samples --samples-files '~{samples}' '~{vcf}'
+    svtk vcf2bed temp.vcf.gz --info SVTYPE '~{vcf_basename}.bed'
+    bgzip '~{vcf_basename}.bed'
   >>>
 
   output {
-    File batches = "batches.list"
+    File bed = vcf_basename + ".bed.gz"
   }
 }
 
-# Extract a single contig from a BED file.
-task GetContigFromBed {
+# Merge batch BED files into per-contig BED files.
+task MergeBatchBedsToContigs {
   input {
-    File bed
-    String contig
+    Array[File]+ beds
+    Array[String]+ contigs
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
 
-  Float input_size = size(bed, "GB")
+  Float input_size = size(beds, "GB")
   RuntimeAttr default_attr = object {
-    mem_gb: 1,
-    cpu_cores: 1,
+    mem_gb: 4,
+    cpu_cores: 2,
     disk_gb: ceil(input_size * 2) + 16,
     boot_disk_gb: 8,
     preemptible_tries: 3,
@@ -894,15 +864,53 @@ task GetContigFromBed {
   command <<<
     set -euo pipefail
 
-    # The BED file will have "header" lines starting with "#chrom"
-    bgzip -cd '~{bed}' \
-      | grep -v '^#' \
-      | awk -F'\t' 'NR==1 || $1 == "~{contig}"' \
-      | bgzip -c > '~{contig}.bed.gz'
+    mkdir splits
+    awk '
+    BEGIN { FS = "\t"; OFS = "\t" }
+    NR == FNR {
+      a[$0] = sprintf("splits/%03d.bed.gz", FNR)
+      b[$0] = "bgzip -c > " a[$0]
+    }
+    NR > FNR && FNR == 1 {
+      in_cmd = "bgzip -cd " quote($0)
+      in_cmd | getline line
+      if (line !~ /^#chrom/) {
+        print "BED file missing header lines" > "/dev/stderr"
+        exit 1
+      }
+      for (f in b) {
+        print line | b[f]
+      }
+      close(in_cmd)
+    }
+    NR > FNR {
+      in_cmd = "bgzip -cd " quote($0)
+      while ((in_cmd | getline line) > 0) {
+        if (line ~ /^#/) {
+          continue
+        }
+
+        split(line, fields)
+        if (fields[1] in a) {
+          print line | b[fields[1]]
+        }
+      }
+      close(in_cmd)
+    }
+    END {
+      for (contig in a) {
+        print contig, a[contig] > "split_beds.tsv"
+      }
+    }
+
+    function quote(x) {
+      gsub(/\047/, "\047\\\047\047", x)
+      return x
+    }' '~{write_lines(contigs)}' '~{write_lines(beds)}'
   >>>
 
   output {
-    File contig_bed = "${contig}.bed.gz"
+    Map[String, File] contig_beds = read_map("split_beds.tsv")
   }
 }
 
@@ -1111,99 +1119,5 @@ task CreatePlots {
 
   output {
     File output_plots = "output_plots.pdf"
-  }
-}
-
-# Organize the pedigree for DeNovoSVsScatter.
-task CleanPed {
-  input {
-    File ped_file
-    File vcf_samples
-    String variant_interpretation_docker
-    RuntimeAttr? runtime_attr_override
-  }
-
-  Float ped_size = size(ped_file, "GB")
-
-  RuntimeAttr default_attr = object {
-    mem_gb: 3.75,
-    disk_gb: ceil(10 + ped_size * 1.5),
-    cpu_cores: 1,
-    preemptible_tries: 3,
-    max_retries: 1,
-    boot_disk_gb: 8
-  }
-  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-  runtime {
-    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
-    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: variant_interpretation_docker
-  }
-
-  command <<<
-    set -exuo pipefail
-
-    # Filter the ped file to only retain rows that have a sample macth in the VCF
-    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && FNR==1{print; next} NR>FNR && ($2 in a)' \
-      '~{vcf_samples}' '~{ped_file}' > filtered.ped
-
-    # Cleaning of pedigree file: 
-    # 1) Small families (≤ 3) are kept as is.
-    # 2) Large families (> 3) are split up into individual trio with FID changed to: FID_#. That means that parents will appear multiple times. 
-    # 3) Parent IDs are set to 0 id the parent does not have its own line in the original pedigree file.
-    # The output file is hardcoded to "cleaned_ped.txt"
-    Rscript /src/denovo/clean_ped.R filtered.ped
-  >>>
-
-  output {
-    File cleaned_ped = "cleaned_ped.txt"
-  }
-}
-
-# Merge lists of samples
-task MergeSampleLists {
-  input {
-    Array[File] samples
-    String linux_docker
-    RuntimeAttr? runtime_attr_override
-  }
-
-  Float input_size = size(samples, "GB")
-
-  RuntimeAttr default_attr = object {
-    mem_gb: 2,
-    disk_gb: ceil(16 + input_size * 2),
-    cpu_cores: 1,
-    preemptible_tries: 3,
-    max_retries: 1,
-    boot_disk_gb: 8
-  }
-  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-  runtime {
-    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
-    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: linux_docker
-  }
-
-  command <<<
-    set -euo pipefail
-
-    cat '~{write_lines(samples)}' \
-      | xargs -L 1 -- cat \
-      | LC_ALL=C sort -u > merged_samples.list
-  >>>
-
-  output {
-    File merged_samples = "merged_samples.list"
   }
 }

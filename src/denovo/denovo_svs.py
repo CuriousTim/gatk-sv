@@ -285,7 +285,7 @@ def main():
     # Parse input arguments
     parser = argparse.ArgumentParser(description='de novo SV caller')
     parser.add_argument('bed', help='Input BED file')
-    parser.add_argument('ped', help='Pedigree file')
+    parser.add_argument('ped', help='Pedigree file only containing trios')
     parser.add_argument('vcf', help='VCF file')
     parser.add_argument('out', help='Output file with all variants')
     parser.add_argument('out_de_novo', help='Output file with only de novo variants')
@@ -349,7 +349,7 @@ def main():
     bed = bed[(bed['samples'] != "")]
     bed.rename(columns={'#chrom': 'chrom'}, inplace = True)
     vcf = pd.read_csv(vcf_file, sep = '\t')
-    ped = pd.read_csv(ped_file, sep = '\t')
+    ped = pd.read_csv(ped_file, sep = '\t', names = ['FamID', 'IndividualID', 'FatherID', 'MotherID', 'Gender', 'Affected'])
     raw_bed_colnames = ['ID', 'start', 'end', 'svtype', 'sample']
     raw_bed_child = pd.read_csv(raw_file_proband, sep ='\t', names=raw_bed_colnames, header = None).replace(np.nan, '', regex = True)
     raw_bed_parent = pd.read_csv(raw_file_parent, sep = '\t', names=raw_bed_colnames, header = None).replace(np.nan, '', regex = True)
@@ -372,13 +372,8 @@ def main():
     # Get parents and children ids
     verbose_print('Getting parents/children/affected/unaffected IDs', verbose)
     start = time.time()
-    list_of_trios = [item for item, count in collections.Counter(ped["FamID"]).items() if count == 3]
-    families = ped[(ped['FamID'].isin(list_of_trios)) &
-                   (ped['FatherID'] != "0") &
-                   (ped['MotherID'] != "0")]['FamID'].values
-    trios = ped[(ped['FamID'].isin(families))]
-    parents = trios[(trios['FatherID'] == "0") & (trios['MotherID'] == "0")]['IndividualID'].values
-    children = trios[(trios['FatherID'] != "0") & (trios['MotherID'] != "0")]['IndividualID'].values
+    parents = pb.concat([ped['FatherID'], ped['MotherID']], ignore_index = True).values
+    children = ped['IndividualID'].values
     end = time.time()
     delta = end - start
     print("Took %f seconds to process" % delta)
