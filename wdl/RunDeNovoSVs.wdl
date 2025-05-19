@@ -610,7 +610,7 @@ task SubsetSamples {
     set -euo pipefail
 
     fam_ids='~{if defined(fams) then fams else ""}'
-    awk -F'\t' '$2 && $3 && $4' > trios.ped
+    awk -F'\t' '$2 && $3 && $4' '~{ped}' > trios.ped
     ped=trios.ped
     
     if [[ -n "${fam_ids:-}" && -s "${fam_ids}" ]]; then
