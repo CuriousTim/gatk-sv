@@ -619,16 +619,35 @@ task SubsetSamples {
     fi
 
     bcftools query --list-samples '~{vcf}' | LC_ALL=C sort > vcf_samples.list
-    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a) && ($2 in a) && ($3 in a)' \
+    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($2 in a) && ($3 in a) && ($4 in a)' \
       vcf_samples.list "${ped}" > subset.ped
 
-    awk -F'\t' '{print $1; print $2; print $3}' subset.ped \
+    awk -F'\t' '{print $2; print $3; print $4}' subset.ped \
       | LC_ALL=C sort > ped_samples.list
 
     LC_ALL=C comm -12 ped_samples.list vcf_samples.list > sample_subset.list
 
     awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($2 in a){print $1}' \
-      sample_subset.list '~{batch_manifest}' > batch_subset.list
+      sample_subset.list '~{batch_manifest}' \
+      | LC_ALL=C sort -u > batch_subset.list
+
+    cat subset.ped | wc -l | read -r ped_n
+    if (( ped_n == 0 )); then
+      printf 'pedigree is empty\n' >&2
+      exit 1
+    fi
+
+    cat sample_subset.list | wc -l | read -r sample_n
+    if (( sample_n == 0 )); then
+      printf 'sample set is empty\n' >&2
+      exit 1
+    fi
+
+    cat batch_subset.list | wc -l | read -r batch_n
+    if (( batch_n == 0 )); then
+      printf 'batch set is empty\n' >&2
+      exit 1
+    fi
   >>>
 
   output {
