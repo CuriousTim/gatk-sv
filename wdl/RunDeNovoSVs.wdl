@@ -631,19 +631,19 @@ task SubsetSamples {
       sample_subset.list '~{batch_manifest}' \
       | LC_ALL=C sort -u > batch_subset.list
 
-    cat subset.ped | wc -l | read -r ped_n
+    read -r ped_n _ < <(wc -l subset.ped)
     if (( ped_n == 0 )); then
       printf 'pedigree is empty\n' >&2
       exit 1
     fi
 
-    cat sample_subset.list | wc -l | read -r sample_n
+    read -r sample_n _ < <(wc -l sample_subset.list)
     if (( sample_n == 0 )); then
       printf 'sample set is empty\n' >&2
       exit 1
     fi
 
-    cat batch_subset.list | wc -l | read -r batch_n
+    read -r batch_n _ < <(wc -l batch_subset.list)
     if (( batch_n == 0 )); then
       printf 'batch set is empty\n' >&2
       exit 1
