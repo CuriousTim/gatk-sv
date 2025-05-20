@@ -425,7 +425,7 @@ task PreFilterVcf {
       | bcftools view --output-type z --output '~{output_vcf}' \
         --no-update --samples-file '~{samples}'
 
-    bcftools head --header 0 --records 1 "~{output_vcf}" | wc -l | read -r nrec
+    read -r nrec _ < <(bcftools head --header 0 --records 1 "~{output_vcf}" | wc -l)
     if (( nrec == 0 )); then
       echo 'filtering VCF removed all sites'
       rm "~{output_vcf}"
