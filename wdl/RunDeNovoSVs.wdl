@@ -841,7 +841,7 @@ task BatchVcfToBed {
     set -euo pipefail
 
     bcftools view --output-type z --output temp.vcf.gz --no-update \
-      --force-samples --samples-files '~{samples}' '~{vcf}'
+      --force-samples --samples-file '~{samples}' '~{vcf}'
     svtk vcf2bed temp.vcf.gz --info SVTYPE '~{vcf_basename}.bed'
     bgzip '~{vcf_basename}.bed'
   >>>
