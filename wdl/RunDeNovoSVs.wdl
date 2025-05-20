@@ -836,7 +836,7 @@ task BatchVcfToBed {
     docker: sv_pipeline_docker
   }
 
-  File vcf_basename = basename(vcf, ".vcf.gz")
+  String vcf_basename = basename(vcf, ".vcf.gz")
   command <<<
     set -euo pipefail
 
