@@ -163,7 +163,7 @@ task MakePloidyMatrix {
   Float input_size = size(bincov, "GB")
   RuntimeAttr runtime_default = object {
     cpu_cores: 1,
-    mem_gb: 2,
+    mem_gb: 4,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
@@ -185,7 +185,6 @@ task MakePloidyMatrix {
   command <<<
     set -euo pipefail
 
-    printf '%s\n' "${PWD}" >&2
     bgzip -cd '~{bincov}' \
       | head -n 1 \
       | awk -F'\t' '{for (i=4; i<=NF; ++i){print $i}}' \
@@ -194,6 +193,7 @@ task MakePloidyMatrix {
     LC_ALL=C comm -13 samples_to_plot.list bincov_samples.list \
       | shuf --head-count ~{background_size} - > bg_samples.list 
     cat samples_to_plot.list bg_samples.list > keep.list
+    ls >&2
 
     bgzip -cd '~{bincov}' \
       | awk -F'\t' '
@@ -232,7 +232,6 @@ task MakePloidyMatrix {
         }
       }' bin_size=~{bin_size} keep.list - \
       | bgzip -c - > '~{output_name}' 
-      ls
   >>>
 
   output {
