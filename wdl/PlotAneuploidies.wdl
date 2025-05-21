@@ -230,7 +230,7 @@ task MakePloidyMatrix {
           cov[i] += $(index[i])
         }
       }' bin_size=~{bin_size} keep.list - \
-      | bgzip -c > '~{output_name}' 
+      | bgzip -c - > '~{output_name}' 
   >>>
 
   output {
