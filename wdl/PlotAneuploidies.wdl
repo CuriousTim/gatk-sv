@@ -185,6 +185,7 @@ task MakePloidyMatrix {
   command <<<
     set -euo pipefail
 
+    printf '%s\n' "${PWD}" >&2
     bgzip -cd '~{bincov}' \
       | head -n 1 \
       | awk -F'\t' '{for (i=4; i<=NF; ++i){print $i}}' \
@@ -231,6 +232,7 @@ task MakePloidyMatrix {
         }
       }' bin_size=~{bin_size} keep.list - \
       | bgzip -c - > '~{output_name}' 
+      ls
   >>>
 
   output {
