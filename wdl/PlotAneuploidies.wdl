@@ -191,7 +191,7 @@ task MakePloidyMatrix {
     # used instead of `||` because the assignment of `ec` swallows the exit
     # code of the `bgzip | head` group.
     { bgzip -cd '~{bincov}' | head -n 1; ec=$?; } \
-      && if [[ "$(kill -l ${ec} == PIPE ]]; then :; else exit ${ec}; fi \
+      && if [[ "$(kill -l ${ec})" == PIPE ]]; then :; else exit ${ec}; fi \
       | awk -F'\t' '{for (i=4; i<=NF; ++i){print $i}}' \
       | LC_ALL=C sort -u > bincov_samples.list
     awk -F'\t' 'NR>1' '~{group}' | LC_ALL=C sort -u > samples_to_plot.list
