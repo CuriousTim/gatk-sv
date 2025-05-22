@@ -163,7 +163,7 @@ task MakePloidyMatrix {
   Float input_size = size(bincov, "GB")
   RuntimeAttr runtime_default = object {
     cpu_cores: 1,
-    mem_gb: 4,
+    mem_gb: 2,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
@@ -190,8 +190,10 @@ task MakePloidyMatrix {
     # can capture the exit code and ignore errors from SIGPIPE. The `&&` is
     # used instead of `||` because the assignment of `ec` swallows the exit
     # code of the `bgzip | head` group.
-    { bgzip -cd '~{bincov}' | head -n 1; ec=$?; } \
-      && if [[ "$(kill -l ${ec})" == PIPE ]]; then :; else exit ${ec}; fi \
+    {
+      { bgzip -cd '~{bincov}' | head -n 1; ec=$?; } \
+        && if [[ "$(kill -l ${ec})" == PIPE ]]; then :; else exit ${ec}; fi
+    } \
       | awk -F'\t' '{for (i=4; i<=NF; ++i){print $i}}' \
       | LC_ALL=C sort -u > bincov_samples.list
     awk -F'\t' 'NR>1' '~{group}' | LC_ALL=C sort -u > samples_to_plot.list
@@ -201,41 +203,41 @@ task MakePloidyMatrix {
 
     bgzip -cd '~{bincov}' \
       | awk -F'\t' '
-      NR == FNR { a[$1] }
-      NR > FNR && FNR == 1 {
-        sub(/^#/, "", $1)
-        printf "%s\t%s\t%s", $1, $2, $3
-        for (i = 4; i <= NF; ++i) {
-          if ($i in a) {
-            index[++j] = i
-            printf "\t%s", $i
+          NR == FNR { a[$1]; next }
+          FNR == 1 {
+            sub(/^#/, "", $1)
+            printf "%s\t%s\t%s", $1, $2, $3
+            for (i = 4; i <= NF; ++i) {
+              if ($i in a) {
+                b[++j] = i
+                printf "\t%s", $i
+              }
+            }
+            printf "\n"
+            next
           }
-        }
-        print
-        next
-      }
-      NR > FNR && FNR == 2 {
-        chr = $1
-        start = $2
-        end = start + bin_size
-      }
-      NR > FNR && (chr && chr != $1) || ($2 >= end) {
-        printf "%s\t%s\t%s", $1, start, end
-        for (i = 1; i <= j; ++i) {
-          printf "\t%s", cov[i]
-          cov[i] = 0
-        }
-        print
-        chr = $1
-        start = $2
-        end = start + bin_size
-      }
-      NR > FNR {
-        for (i = 1; i <= j; ++i) {
-          cov[i] += $(index[i])
-        }
-      }' bin_size=~{bin_size} keep.list - \
-      | bgzip -c - > '~{output_name}' 
+          FNR == 2 {
+            chr = $1
+            start = $2
+            end = start + bin_size
+          }
+          (chr && chr != $1) || ($2 >= end) {
+            printf "%s\t%s\t%s", $1, start, end
+            for (i = 1; i <= j; ++i) {
+              printf "\t%s", cov[i]
+              cov[i] = 0
+            }
+            printf "\n"
+            chr = $1
+            start = $2
+            end = start + bin_size
+          }
+          {
+            for (i = 1; i <= j; ++i) {
+              cov[i] += $(b[i])
+            }
+          }' bin_size=~{bin_size} keep.list - \
+      | bgzip -c > '~{output_name}'
   >>>
 
   output {
