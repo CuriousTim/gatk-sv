@@ -222,11 +222,12 @@ task MakePloidyMatrix {
             end = start + bin_size
           }
           (chr && chr != $1) || ($2 >= end) {
-            printf "%s\t%s\t%s", $1, start, end
+            printf "%s\t%s\t%s", chr, start, end
             for (i = 1; i <= j; ++i) {
               printf "\t%s", cov[i]
               cov[i] = 0
             }
+            rows = 0
             printf "\n"
             chr = $1
             start = $2
@@ -235,6 +236,16 @@ task MakePloidyMatrix {
           {
             for (i = 1; i <= j; ++i) {
               cov[i] += $(b[i])
+            }
+            ++rows
+          }
+          END {
+            if (rows) {
+              printf "%s\t%s\t%s", chr, start, end
+              for (i = 1; i <= j; ++i) {
+                printf "\t%s", cov[i]
+              }
+              printf "\n"
             }
           }' bin_size=~{bin_size} keep.list - \
       | bgzip -c > '~{output_name}'
