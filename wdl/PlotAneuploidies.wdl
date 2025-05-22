@@ -185,15 +185,19 @@ task MakePloidyMatrix {
   command <<<
     set -euo pipefail
 
-    bgzip -cd '~{bincov}' \
-      | head -n 1 \
+    # The head command will cause bgzip to exit from a SIGPIPE and the whole
+    # list exit with a non-zero exit code, causing the script to error. We
+    # can capture the exit code and ignore errors from SIGPIPE. The `&&` is
+    # used instead of `||` because the assignment of `ec` swallows the exit
+    # code of the `bgzip | head` group.
+    { bgzip -cd '~{bincov}' | head -n 1; ec=$?; } \
+      && if [[ "$(kill -l ${ec} == PIPE ]]; then :; else exit ${ec}; fi \
       | awk -F'\t' '{for (i=4; i<=NF; ++i){print $i}}' \
       | LC_ALL=C sort -u > bincov_samples.list
     awk -F'\t' 'NR>1' '~{group}' | LC_ALL=C sort -u > samples_to_plot.list
     LC_ALL=C comm -13 samples_to_plot.list bincov_samples.list \
       | shuf --head-count ~{background_size} - > bg_samples.list 
     cat samples_to_plot.list bg_samples.list > keep.list
-    ls >&2
 
     bgzip -cd '~{bincov}' \
       | awk -F'\t' '
