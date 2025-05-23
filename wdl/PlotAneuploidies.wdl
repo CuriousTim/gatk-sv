@@ -12,9 +12,6 @@ workflow PlotAneuploidies {
     Array[String] batch_ids
     Array[String] bincov_matrices
 
-    String? chr_x
-    String? chr_y
-
     Int bin_size = 1000000
     Int background_size = 100
 
