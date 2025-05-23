@@ -216,6 +216,13 @@ workflow DeNovoSV {
       runtime_attr_override = runtime_override_merge_clustered_bed
   }
 
+  call SyncContigBedPaths as SyncPesrBed {
+    input:
+      contig_beds_map = MergePesrBed.contig_beds_map,
+      contig_beds = MergePesrBed.contig_beds,
+      linux_docker = linux_docker
+  }
+
   call MergeBatchBedsToContigs as MergeDepthBed {
     input:
       beds = DepthVcfToBed.bed,
@@ -224,31 +231,17 @@ workflow DeNovoSV {
       runtime_attr_override = runtime_override_merge_clustered_bed
   }
 
-  scatter (contig in kept_contigs) {
-    call ReformatContigBed as ReformatPesrBed {
-      input:
-        bed = MergePesrBed.contig_beds_map[contig],
-        contig = contig,
-        type = "",
-        pedigree = SubsetSamples.ped_subset,
-        sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_reformat_bed
-    }
-
-    call ReformatContigBed as ReformatDepthBed {
-      input:
-        bed = MergeDepthBed.contig_beds_map[contig],
-        contig = contig,
-        type = "depth",
-        pedigree = SubsetSamples.ped_subset,
-        sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_reformat_bed
-    }
+  call SyncContigBedPaths as SyncDepthBed {
+    input:
+      contig_beds_map = MergeDepthBed.contig_beds_map,
+      contig_beds = MergeDepthBed.contig_beds,
+      linux_docker = linux_docker
   }
 
   # Scatter the following tasks across chromosomes: miniTasks.ScatterVCf,
   # and runDeNovo.DeNovoSVsScatter.
   scatter (i in range(length(split_vcfs))) {
+    String current_contig = kept_contigs[i]
     # Shards vcf
     call miniTasks.ScatterVcf as ScatterVcf {
       input:
@@ -260,16 +253,36 @@ workflow DeNovoSV {
         runtime_attr_override = runtime_override_shard_vcf
     }
 
+    call ReformatContigBed as ReformatPesrBed {
+      input:
+        bed = SyncPesrBed.synced_bed_map[current_contig],
+        contig = kept_contigs[i],
+        type = "",
+        pedigree = SubsetSamples.ped_subset,
+        sv_base_mini_docker = sv_base_mini_docker,
+        runtime_attr_override = runtime_override_reformat_bed
+    }
+
+    call ReformatContigBed as ReformatDepthBed {
+      input:
+        bed = SyncDepthBed.synced_bed_map[current_contig],
+        contig = kept_contigs[i],
+        type = "depth",
+        pedigree = SubsetSamples.ped_subset,
+        sv_base_mini_docker = sv_base_mini_docker,
+        runtime_attr_override = runtime_override_reformat_bed
+    }
+
     # Runs the de novo calling python script on each shard and outputs a per chromosome list of de novo SVs
     call runDeNovo.DeNovoSVsScatter as GetDeNovo {
       input:
         pedigree = SubsetSamples.ped_subset,
         vcfs = ScatterVcf.shards,
         chromosome = kept_contigs[i],
-        raw_proband = ReformatPesrBed.reformatted_proband_bed[i],
-        raw_parents = ReformatPesrBed.reformatted_parents_bed[i],
-        raw_depth_proband = ReformatDepthBed.reformatted_proband_bed[i],
-        raw_depth_parents = ReformatDepthBed.reformatted_parents_bed[i],
+        raw_proband = ReformatPesrBed.reformatted_proband_bed,
+        raw_parents = ReformatPesrBed.reformatted_parents_bed,
+        raw_depth_proband = ReformatDepthBed.reformatted_proband_bed,
+        raw_depth_parents = ReformatDepthBed.reformatted_parents_bed,
         sample_batches = SubsetManifestsByBatches.subset_sample_manifest,
         batch_bincov_index = SubsetManifestsByBatches.subset_bincov_manifest,
         small_cnv_size = small_cnv_size,
@@ -932,7 +945,41 @@ task MergeBatchBedsToContigs {
 
   output {
     Map[String, File] contig_beds_map = read_map("split_beds.tsv")
-    Array[File] contig_beds = read_lines("bed_paths.list")
+    Array[File] contig_beds = glob("splits/*.bed.gz")
+  }
+}
+
+task SyncContigBedPaths {
+  input {
+    Map[String, String] contig_beds_map
+    Array[String] contig_beds
+    String linux_docker
+  }
+
+  command <<<
+    set -euo pipefail
+
+    bed_map='~{write_map(contig_beds_map)}'
+    bed_paths='~{write_lines(contig_beds)}'
+
+    awk -F'\t' 'NR==FNR{n=split($2, a, /\//); b[a[n]] = $1}
+                NR>FNR{n=split($0, a, /\//); c[a[n]] = $0}
+                END{for(i in b){print b[i] "\t" c[i]}}' \
+      "${bed_map}" "${bed_paths}" > synced_map.tsv
+  >>>
+
+  runtime {
+    memory: "1 GB"
+    cpu: 1
+    disks: "local-disk 16 HDD"
+    bootDiskSizeGb: 8
+    preemptible: 3
+    maxRetries: 1
+    docker: linux_docker
+  }
+
+  output {
+    Map[String, String] synced_bed_map = read_map("synced_map.tsv")
   }
 }
 
