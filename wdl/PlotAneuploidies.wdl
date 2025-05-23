@@ -294,7 +294,7 @@ task PloidyScore {
               printf "\n"
             }' target="${s}" samples.list - \
         | bgzip -c > mat.bed.gz
-      Rscript /opt/WGD/bin/estimatePloidy.R -z -O "./ploidy_est/${s}"
+      Rscript /opt/WGD/bin/estimatePloidy.R -z -O "./ploidy_est/${s}" mat.bed.gz
       sleep 10
     done < samples.list
 
