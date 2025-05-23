@@ -21,7 +21,7 @@ workflow PlotAneuploidies {
     # Runtime parameters
     String linux_docker
     String sv_base_mini_docker
-    # String sv_pipeline_qc_docker
+    String sv_pipeline_docker
 
     RuntimeAttr? runtime_override_group_samples
     RuntimeAttr? runtime_override_ploidy_matrix
@@ -50,26 +50,18 @@ workflow PlotAneuploidies {
         runtime_override = runtime_override_ploidy_matrix
     }
 
-    # call PlotPloidy {
-    #   input:
-    #     ploidy_matrix = PloidyMatrix.ploidy_matrix
-    #     batch = batch_name, 
-    #     chr_x = chr_x,
-    #     chr_y = chr_y,
-    #     sv_pipeline_qc_docker = sv_pipeline_qc_docker,
-    #     runtime_override = runtime_override_ploidy
-    # }
+    call pe.PloidyScore {
+      input:
+        ploidy_matrix = MakePloidyMatrix.ploidy_matrix,
+        batch = batch_name,
+        sv_pipeline_qc_docker = sv_pipeline_docker,
+        runtime_attr_override = runtime_override_ploidy
+    }
   }
 
-  # call MergePlots {
-  #   input:
-  #     plots = PlotPloidy.plots,
-  #     linux_docker = linux_docker,
-  #     runtime_override = runtime_override_ploidy
-  # }
-
   output {
-    Array[File] ploidy_matricies = MakePloidyMatrix.ploidy_matrix
+    Array[File] groups = GroupSamples.groups
+    Array[File] ploidy = PloidyScore.ploidy_plots
   }
 }
 
@@ -255,38 +247,3 @@ task MakePloidyMatrix {
     File ploidy_matrix = output_name
   }
 }
-#
-# task PlotPloidy {
-#   input {
-#     File ploidy_matrix
-#     String chr_x = "chrX"
-#     String chr_y = "chrY"
-#     String sv_pipeline_qc_docker
-#     RuntimeAttr? runtime_override    
-#   }
-# 
-#   Float input_size = size(ploidy_matrix, "GB")
-#   RuntimeAttr runtime_default = object {
-#     cpu_cores: 1,
-#     mem_gb: 2,
-#     boot_disk_gb: 8,
-#     preemptible_tries: 3,
-#     max_retries: 1,
-#     disk_gb: ceil(input_size * 2) + 16
-#   }
-#   RuntimeAttr runtime_attr = select_first([runtime_override, runtime_default])
-# 
-#   runtime {
-#     docker: sv_pipeline_qc_docker
-#     cpu: select_first([runtime_attr.cpu_cores, runtime_default.cpu_cores])
-#     memory: select_first([runtime_attr.mem_gb, runtime_default.mem_gb]) + " GiB"
-#     disks: "local-disk " + select_first([runtime_attr.disk_gb, runtime_default.disk_gb]) + " HDD"
-#     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, runtime_default.boot_disk_gb])
-#     preemptible: select_first([runtime_attr.preemptible_tries, runtime_default.preemptible_tries])
-#     maxRetries: select_first([runtime_attr.max_retries, runtime_default.max_retries])
-#   }
-# 
-#   command <<<
-#     set -euo pipefail
-#   >>>
-#}
