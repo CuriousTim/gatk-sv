@@ -920,6 +920,7 @@ task MergeBatchBedsToContigs {
     END {
       for (contig in a) {
         print contig, a[contig] > "split_beds.tsv"
+        print a[contig] > "bed_paths.list"
       }
     }
 
@@ -931,7 +932,7 @@ task MergeBatchBedsToContigs {
 
   output {
     Map[String, File] contig_beds_map = read_map("split_beds.tsv")
-    Array[File] contig_beds = glob("splits/*.bed.gz")
+    Array[File] contig_beds = read_lines("bed_paths.list")
   }
 }
 
