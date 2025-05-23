@@ -48,6 +48,7 @@ workflow PlotAneuploidies {
 
     call PloidyScore {
       input:
+        group = GroupSamples.groups[i],
         ploidy_matrix = MakePloidyMatrix.ploidy_matrix,
         batch = batch_name,
         sv_pipeline_qc_docker = sv_pipeline_docker,
@@ -56,7 +57,6 @@ workflow PlotAneuploidies {
   }
 
   output {
-    Array[File] groups = GroupSamples.groups
     Array[File] ploidy = PloidyScore.ploidy_plots
   }
 }
@@ -246,6 +246,7 @@ task MakePloidyMatrix {
 
 task PloidyScore {
   input {
+    File group
     File ploidy_matrix
     String batch
     String sv_pipeline_qc_docker
@@ -255,28 +256,52 @@ task PloidyScore {
   RuntimeAttr default_attr = object {
     cpu_cores: 1, 
     mem_gb: 3.75,
-    disk_gb: 10,
+    disk_gb: 16,
     boot_disk_gb: 10,
     preemptible_tries: 3,
     max_retries: 1
   }
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-  output {
-    File ploidy_plots = "${batch}_ploidy_plots.tar.gz"
-  }
+
   command <<<
-
     set -euo pipefail
-    mkdir ploidy_est
-    Rscript /opt/WGD/bin/estimatePloidy.R -z -O ./ploidy_est \
-      ~{ploidy_matrix}
 
-    sleep 10
+    awk 'NR>1' '~{group}' > samples.list
+    mkdir ploidy_est
+
+    while read -r s; do
+      mkdir "ploidy_est/${s}"
+      bgzip -cd '~{ploidy_matrix}' \
+        | awk -F'\t' '
+            NR == FNR {a[$1]; next}
+            NR > FNR && FNR == 1 {
+              printf "%s\t%s\t%s", $1, $2, $3
+              for (i = 4; i <= NF; ++i) {
+                if (!($i in a) || ($i == target)) {
+                  b[i]
+                  printf "\t%s", $i
+                }
+              }
+              printf "\n"
+            }
+            NR > FNR && FNR > 1 {
+              printf "%s\t%s\t%s", $1, $2, $3
+              for (i = 4; i <= NF; ++i) {
+                if (i in b) {
+                  printf "\t%s", $i
+              }
+              printf "\n"
+            }' target="${s}" samples.list - \
+        | bgzip -c > mat.bed.gz
+      Rscript /opt/WGD/bin/estimatePloidy.R -z -O "./ploidy_est/${s}"
+      sleep 10
+    done < samples.list
 
     tar -zcf ./ploidy_est.tar.gz ./ploidy_est
     mv ploidy_est.tar.gz ~{batch}_ploidy_plots.tar.gz
   
   >>>
+
   runtime {
     cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
     memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GiB"
@@ -285,5 +310,9 @@ task PloidyScore {
     docker: sv_pipeline_qc_docker
     preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
     maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+  }
+
+  output {
+    File ploidy_plots = "${batch}_ploidy_plots.tar.gz"
   }
 }
