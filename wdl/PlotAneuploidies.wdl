@@ -289,6 +289,7 @@ task PloidyScore {
               for (i = 4; i <= NF; ++i) {
                 if (i in b) {
                   printf "\t%s", $i
+                }
               }
               printf "\n"
             }' target="${s}" samples.list - \
