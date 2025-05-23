@@ -227,7 +227,7 @@ workflow DeNovoSV {
   scatter (contig in kept_contigs) {
     call ReformatContigBed as ReformatPesrBed {
       input:
-        bed = MergePesrBed.contig_beds[contig],
+        bed = MergePesrBed.contig_beds_map[contig],
         contig = contig,
         type = "",
         pedigree = SubsetSamples.ped_subset,
@@ -237,7 +237,7 @@ workflow DeNovoSV {
 
     call ReformatContigBed as ReformatDepthBed {
       input:
-        bed = MergeDepthBed.contig_beds[contig],
+        bed = MergeDepthBed.contig_beds_map[contig],
         contig = contig,
         type = "depth",
         pedigree = SubsetSamples.ped_subset,
@@ -930,7 +930,8 @@ task MergeBatchBedsToContigs {
   >>>
 
   output {
-    Map[String, File] contig_beds = read_map("split_beds.tsv")
+    Map[String, File] contig_beds_map = read_map("split_beds.tsv")
+    Array[File] contig_beds = glob("splits/*.bed.gz")
   }
 }
 
