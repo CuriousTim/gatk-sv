@@ -1,7 +1,6 @@
 version 1.0
 
 import "Structs.wdl"
-import "PloidyEstimation.wdl" as pe
 
 workflow PlotAneuploidies {
   input {
@@ -47,7 +46,7 @@ workflow PlotAneuploidies {
         runtime_override = runtime_override_ploidy_matrix
     }
 
-    call pe.PloidyScore {
+    call PloidyScore {
       input:
         ploidy_matrix = MakePloidyMatrix.ploidy_matrix,
         batch = batch_name,
@@ -242,5 +241,49 @@ task MakePloidyMatrix {
 
   output {
     File ploidy_matrix = output_name
+  }
+}
+
+task PloidyScore {
+  input {
+    File ploidy_matrix
+    String batch
+    String sv_pipeline_qc_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  RuntimeAttr default_attr = object {
+    cpu_cores: 1, 
+    mem_gb: 3.75,
+    disk_gb: 10,
+    boot_disk_gb: 10,
+    preemptible_tries: 3,
+    max_retries: 1
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+  output {
+    File ploidy_plots = "${batch}_ploidy_plots.tar.gz"
+  }
+  command <<<
+
+    set -euo pipefail
+    mkdir ploidy_est
+    Rscript /opt/WGD/bin/estimatePloidy.R -z -O ./ploidy_est \
+      ~{ploidy_matrix}
+
+    sleep 10
+
+    tar -zcf ./ploidy_est.tar.gz ./ploidy_est
+    mv ploidy_est.tar.gz ~{batch}_ploidy_plots.tar.gz
+  
+  >>>
+  runtime {
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GiB"
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    docker: sv_pipeline_qc_docker
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
   }
 }
