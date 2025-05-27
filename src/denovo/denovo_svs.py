@@ -97,7 +97,7 @@ def get_parents(proband, ped):
 
 def get_family_id(row, ped):
     samp = row['sample']
-    family_id = ped[(ped['IndividualID'] == samp)]['FamID'].values
+    family_id = ped[(ped['IndividualID'] == samp) | (ped['FatherID'] == samp) | (ped['MotherID'] == samp)]['FamID'].values
     return family_id[0]
 
 
@@ -372,7 +372,7 @@ def main():
     # Get parents and children ids
     verbose_print('Getting parents/children/affected/unaffected IDs', verbose)
     start = time.time()
-    parents = pb.concat([ped['FatherID'], ped['MotherID']], ignore_index = True).values
+    parents = pd.concat([ped['FatherID'], ped['MotherID']], ignore_index = True).values
     children = ped['IndividualID'].values
     end = time.time()
     delta = end - start
