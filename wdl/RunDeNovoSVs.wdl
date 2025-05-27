@@ -96,7 +96,6 @@ workflow DeNovoSV {
     RuntimeAttr? runtime_override_denovo_merge_bed
     RuntimeAttr? runtime_override_vcf_to_bed
     RuntimeAttr? runtime_override_merge_denovo_bed
-    RuntimeAttr? runtime_override_create_plots
     RuntimeAttr? runtime_override_call_outliers
   }
 
@@ -320,20 +319,10 @@ workflow DeNovoSV {
       runtime_attr_override = runtime_override_call_outliers
   }
 
-  # Generates plots for QC
-  call CreatePlots {
-    input:
-      bed_file = CallOutliers.final_denovo_nonOutliers_output,
-      ped_file = SubsetSamples.ped_subset,
-      variant_interpretation_docker=variant_interpretation_docker,
-      runtime_attr_override = runtime_override_create_plots
-  }
-
   output {
     File cleaned_ped = SubsetSamples.ped_subset
     File final_denovo_nonOutliers = CallOutliers.final_denovo_nonOutliers_output
     File final_denovo_outliers = CallOutliers.final_denovo_outliers_output
-    File final_denovo_nonOutliers_plots = CreatePlots.output_plots
     Array [File] denovo_output_annotated = GetDeNovo.per_chromosome_annotation_output_file
   }
 }
@@ -1146,47 +1135,5 @@ task CallOutliers {
     File final_denovo_nonOutliers_output = "final.denovo.merged.bed.gz"
     File final_denovo_outliers_output = "final.denovo.merged.outliers.bed.gz"
     File final_denovo_allSamples_output = "final.denovo.merged.allSamples.bed.gz"
-  }
-}
-
-# Make plots for the de novo calls.
-task CreatePlots {
-  input {
-    File bed_file
-    File ped_file
-    String variant_interpretation_docker
-    RuntimeAttr? runtime_attr_override
-  }
-
-  Float input_size = size(select_all([bed_file, ped_file]), "GB")
-
-  RuntimeAttr default_attr = object {
-    mem_gb: 16, # 3.75
-    disk_gb: ceil(10 + input_size * 1.2),
-    cpu_cores: 1,
-    preemptible_tries: 2,
-    max_retries: 1,
-    boot_disk_gb: 8
-  }
-  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-  command <<<
-    set -exuo pipefail
-
-    Rscript /src/denovo/denovo_sv_plots.R ~{bed_file} ~{ped_file} output_plots.pdf
-  >>>
-
-  runtime {
-    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
-    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: variant_interpretation_docker
-  }
-
-  output {
-    File output_plots = "output_plots.pdf"
   }
 }
