@@ -23,6 +23,7 @@ workflow EvidenceQC {
 
     # Global files
     File genome_file
+    File allosome_contigs
 
     # Coverage files
     Array[File] counts
@@ -35,9 +36,6 @@ workflow EvidenceQC {
 
     # WGD files
     File wgd_scoring_mask
-
-    String? chr_x
-    String? chr_y
 
     # Runtime parameters
     String sv_base_mini_docker
@@ -91,8 +89,7 @@ workflow EvidenceQC {
       input:
         bincov_matrix = MakeBincovMatrix.merged_bincov,
         batch = batch,
-        chr_x = chr_x,
-        chr_y = chr_y,
+        allosome_contigs = allosome_contigs,
         sv_base_mini_docker = sv_base_mini_docker,
         sv_pipeline_qc_docker = sv_pipeline_qc_docker,
         runtime_attr_score = ploidy_score_runtime_attr,
