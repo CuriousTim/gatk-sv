@@ -8,7 +8,6 @@ workflow Ploidy {
     String batch
     String sv_base_mini_docker
     String sv_pipeline_qc_docker
-    File allosome_contigs
     RuntimeAttr? runtime_attr_score
     RuntimeAttr? runtime_attr_build
   }
@@ -28,7 +27,6 @@ workflow Ploidy {
     input:
       ploidy_matrix = BuildPloidyMatrix.ploidy_matrix,
       batch = batch,
-      allosome_contigs = allosome_contigs,
       sv_pipeline_qc_docker = sv_pipeline_qc_docker,
       runtime_attr_override = runtime_attr_score
   }
@@ -96,7 +94,6 @@ task PloidyScore {
   input {
     File ploidy_matrix
     String batch
-    File allosome_contigs
     String sv_pipeline_qc_docker
     RuntimeAttr? runtime_attr_override
   }
@@ -117,8 +114,7 @@ task PloidyScore {
 
     set -euo pipefail
     mkdir ploidy_est
-    cut -f 1 '~{allosome_contigs}' > allosome_contigs.list
-    Rscript /opt/WGD/bin/estimatePloidy.R -z -O ./ploidy_est --allosomes allosome_contigs.list ~{ploidy_matrix}
+    Rscript /opt/WGD/bin/estimatePloidy.R -z -O ./ploidy_est ~{ploidy_matrix}
 
     #TODO: hotfix for "file changed as we read it" error caused by non-blocking system() calls in the R script
     sleep 10

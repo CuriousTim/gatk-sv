@@ -23,7 +23,6 @@ workflow EvidenceQC {
 
     # Global files
     File genome_file
-    File allosome_contigs
 
     # Coverage files
     Array[File] counts
@@ -89,7 +88,6 @@ workflow EvidenceQC {
       input:
         bincov_matrix = MakeBincovMatrix.merged_bincov,
         batch = batch,
-        allosome_contigs = allosome_contigs,
         sv_base_mini_docker = sv_base_mini_docker,
         sv_pipeline_qc_docker = sv_pipeline_qc_docker,
         runtime_attr_score = ploidy_score_runtime_attr,
