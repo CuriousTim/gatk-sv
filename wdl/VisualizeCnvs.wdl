@@ -125,7 +125,7 @@ task FormatVCFOrBED {
       fi
     }
     if [[ '~{vcf_or_bed}' == *.vcf.gz ]]; then
-      bcftools view --include '(SVTYPE == "DEL" || SVTYPE == "DUP") && SVLEN >= ~{min_size}' '~{vcf_or_bed}' \
+      bcftools view --include '(SVTYPE == "DEL" || SVTYPE == "DUP") && FILTER ~ "PASS" && SVLEN >= ~{min_size}' '~{vcf_or_bed}' \
         | svtk vcf2bed stdin raw.bed
       awk -F'\t' -v OFS='\t' '!/^#/{print $1,$2,$3,$4,$6,$5}' raw.bed \
         | LC_ALL=C sort -k1,1 -k2,2n > cnvs.bed
