@@ -10,7 +10,6 @@ workflow VisualizeCnvs {
     Array[File] vcfs_or_beds  # bed columns: chrom,start,end,name,svtype,samples
     Boolean pass_only = true
     String plot_prefix
-    File ped_file
     Int min_size
     Int? variants_per_shard
     String rdtest_flags
@@ -98,7 +97,6 @@ workflow VisualizeCnvs {
         rd_file_indicies = GatherShardUris.rd_index_uris,
         median_files = GatherShardUris.medians_uris,
         sample_table = sample_table,
-        ped_file = ped_file,
         plot_prefix = plot_prefix,
         sv_pipeline_docker = sv_pipeline_docker,
         flags = rdtest_flags,
@@ -258,7 +256,7 @@ task FormatVcfOrBed {
         print > Variants_out
         split($5, a, /,/)
         for(i in a) {
-          batches[samples[a[i]]]
+          Batches[samples[a[i]]]
           print $1,$2,$3 > ("intervals/"samples[a[i]]".intervals.tmp")
         }
       }
@@ -457,7 +455,6 @@ task RdTestPlot {
     Array[File] rd_file_indicies
     Array[File] median_files
     File sample_table
-    File ped_file
     String plot_prefix
     String sv_pipeline_docker
     String flags
@@ -469,7 +466,6 @@ task RdTestPlot {
     + size(rd_file_indicies, "GB")
     + size(median_files, "GB")
     + size(sample_table, "GB")
-    + size(ped_file, "GB")
     + size(variants, "GB")
 
   RuntimeAttr default_attr = object {
