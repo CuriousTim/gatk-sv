@@ -370,7 +370,7 @@ task SubsetRdMatrix {
     maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
   }
 
-  String subset_name = batch_id + ".bed.gz"
+  String subset_name = batch_id + ".RD.txt.gz"
   command <<<
     set -o errexit
     set -o nounset
