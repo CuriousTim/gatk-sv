@@ -12,7 +12,7 @@ import "DeNovoSVsScatter.wdl" as runDeNovo
 # MAIN WORKFLOW DEFINITION
 ###########################
 
-workflow DeNovoSV {
+workflow DeNovoSvs {
   input {
     # Core input files
     File pedigree
