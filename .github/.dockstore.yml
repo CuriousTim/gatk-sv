@@ -226,8 +226,8 @@ workflows:
         - /.*/
 
   - subclass: WDL
-    name: CallDeNovoSV
-    primaryDescriptorPath: /wdl/RunDeNovoSVs.wdl
+    name: DeNovoSvs
+    primaryDescriptorPath: /wdl/DeNovoSvs.wdl
     filters:
       branches:
         - main
