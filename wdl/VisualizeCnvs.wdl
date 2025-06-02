@@ -7,9 +7,8 @@ import "Structs.wdl"
 workflow VisualizeCnvs {
   input{
     # Note vcf will be faster
-    File vcf_or_bed  # bed columns: chrom,start,end,name,svtype,samples
+    Array[File] vcf_or_bed  # bed columns: chrom,start,end,name,svtype,samples
     String plot_prefix
-    File ped_file
     Int min_size
     Int? variants_per_shard
     String rdtest_flags
@@ -21,6 +20,7 @@ workflow VisualizeCnvs {
 
     String linux_docker
     String sv_pipeline_docker
+    String sv_base_mini_docker
     RuntimeAttr? runtime_attr_format_vcf_or_bed
     RuntimeAttr? runtime_attr_shard_variants
     RuntimeAttr? runtime_attr_subset_rd_matrices
@@ -28,20 +28,22 @@ workflow VisualizeCnvs {
     RuntimeAttr? runtime_attr_merge_plot_tars
   }
 
-  call FormatVCFOrBED {
-    input:
-      vcf_or_bed = vcf_or_bed,
-      min_size = min_size,
-      sv_pipeline_docker = sv_pipeline_docker,
-      runtime_attr_override = runtime_attr_format_vcf_or_bed
-  }
+  scatter (file in vcf_or_bed) {
+    call FormatVCFOrBED {
+      input:
+        vcf_or_bed = file,
+        min_size = min_size,
+        sv_pipeline_docker = sv_pipeline_docker,
+        runtime_attr_override = runtime_attr_format_vcf_or_bed
+    }
 
-  call ShardVariants {
-    input:
-      variants = FormatVCFOrBED.variants,
-      variants_per_shard = variants_per_shard,
-      linux_docker = linux_docker,
-      runtime_attr_override = runtime_attr_shard_variants
+    call ShardVariants {
+      input:
+        variants = FormatVCFOrBED.variants,
+        variants_per_shard = variants_per_shard,
+        linux_docker = linux_docker,
+        runtime_attr_override = runtime_attr_shard_variants
+    }
   }
 
   scatter (i in range(length(rd_files))) {
@@ -50,12 +52,13 @@ workflow VisualizeCnvs {
         rd_file = rd_files[i],
         rd_file_index = rd_file_indicies[i],
         intervals = FormatVCFOrBED.intervals,
-        sv_pipeline_docker = sv_pipeline_docker,
+        sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_attr_subset_rd_matrices
     }
   }
 
-  scatter (shard in ShardVariants.shards) {
+  Array[File] flat_shards = flatten(ShardVariants.shards)
+  scatter (shard in flat_shards) {
     call RdTestPlot {
       input:
         variants = shard,
@@ -63,7 +66,6 @@ workflow VisualizeCnvs {
         rd_file_indicies = SubsetRDMatrices.rd_subset_index,
         median_files = median_files,
         sample_table = sample_table,
-        ped_file = ped_file,
         plot_prefix = plot_prefix,
         sv_pipeline_docker = sv_pipeline_docker,
         flags = rdtest_flags,
@@ -199,14 +201,14 @@ task SubsetRDMatrices {
   input {
     File rd_file
     File rd_file_index
-    File intervals
-    String sv_pipeline_docker
+    Array[File] intervals
+    String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
 
   RuntimeAttr default_attr = object {
     cpu_cores: 1,
-    mem_gb: 1,
+    mem_gb: 2,
     disk_gb: ceil(size(rd_file, "GB") + size(rd_file_index, "GB") + size(intervals, "GB")) + 16,
     boot_disk_gb: 16,
     preemptible_tries: 3,
@@ -219,7 +221,7 @@ task SubsetRDMatrices {
     memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GiB"
     disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-    docker: sv_pipeline_docker
+    docker: sv_base_mini_docker
     preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
     maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
   }
@@ -231,7 +233,8 @@ task SubsetRDMatrices {
     set -o nounset
     set -o pipefail
 
-    tabix --print-header --regions '~{intervals}' '~{rd_file}' \
+    cat '~{intervals}' | xargs cat | sort -k1,1 -k2,2n | bedtools merge -i stdin -d 101 > intervals.bed
+    tabix --print-header --regions intervals.bed '~{rd_file}' \
       | awk '/^#/{print "0\t0\t0\t" $0; next} 1' \
       | LC_ALL=C sort --unique -t$'\t' -k1,1 -k2,2n -k3,3n \
       | awk 'NR == 1{sub(/^0\t0\t0\t/, "")} 1' \
@@ -252,7 +255,6 @@ task RdTestPlot {
     Array[File] rd_file_indicies
     Array[File] median_files
     File sample_table
-    File ped_file
     String plot_prefix
     String sv_pipeline_docker
     String flags
@@ -264,7 +266,6 @@ task RdTestPlot {
     + size(rd_file_indicies, "GB")
     + size(median_files, "GB")
     + size(sample_table, "GB")
-    + size(ped_file, "GB")
     + size(variants, "GB")
 
   RuntimeAttr default_attr = object {
