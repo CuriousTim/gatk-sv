@@ -209,7 +209,7 @@ task SubsetRdMatrix {
   RuntimeAttr default_attr = object {
     cpu_cores: 1,
     mem_gb: 4,
-    disk_gb: ceil(size(rd_file, "GB") + size(rd_file_index, "GB") + size(intervals, "GB")) + 16,
+    disk_gb: ceil(size(rd_file, "GB") * 1.5 + size(rd_file_index, "GB") + size(intervals, "GB")) + 16,
     boot_disk_gb: 16,
     preemptible_tries: 3,
     max_retries: 1
@@ -234,12 +234,8 @@ task SubsetRdMatrix {
     set -o pipefail
 
     cat '~{write_lines(intervals)}' | xargs cat | sort -k1,1 -k2,2n | bedtools merge -i stdin -d 101 > intervals.bed
-    tabix --print-header --regions intervals.bed '~{rd_file}' \
-      | awk '/^#/{print "0\t0\t0\t" $0; next} 1' \
-      | LC_ALL=C sort --unique -t$'\t' -k1,1 -k2,2n -k3,3n \
-      | awk 'NR == 1{sub(/^0\t0\t0\t/, "")} 1' \
-      | bgzip > '~{rd_file_bn}'
-    tabix --preset bed '~{rd_file_bn}'
+    tabix --print-header --regions intervals.bed '~{rd_file}' | bgzip > '~{rd_file_bn}'
+    tabix --zero-based --begin 2 --comment '#' --end 3 --sequence 1 '~{rd_file_bn}'
   >>>
 
   output {
