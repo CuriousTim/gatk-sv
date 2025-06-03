@@ -14,27 +14,30 @@ import "DeNovoSVsScatter.wdl" as runDeNovo
 
 workflow DeNovoSvs {
   input {
-    # Core input files
+    #' Core input files
     File pedigree
     # One family ID per line to call de novo in subset of families
     File? family_ids
 
-    # VCF filter parameters
+    #' VCF filter parameters
     Float max_cohort_af = 0.02
     Float max_gnomad_af = 0.01
     # Minimum fraction of SV overlapped by GD region
-    Float gd_overlap = 0.05
+    Float gd_overlap = 0.5
     File gd_regions
+    # BED3 files with hg38 exclude regions
+    Array[File]? exclude_regions
+    Float exclude_regions_ovp = 0.5
+
+    Int large_cnv_size = 5000
+    Int depth_only_size = 5000
 
     # Either a single VCF or an array of VCFs with each one containing a single
     # contig. In the case of a single VCF, it is expected that all the contigs
     # in the input contigs are present. In the case of multiple VCFs, all VCFs
     # must contain the exact same set of samples.
-    Array[File] vcfs
-    Array[File] vcf_indicies
-    # BED3 files with hg38 blacklist regions
-    Array[File]? blacklists
-    Float blacklist_overlap = 0.5
+    Array[File]+ vcfs
+    Array[File]+ vcf_indicies
 
     # Running parameters
     String output_prefix
@@ -126,6 +129,7 @@ workflow DeNovoSvs {
       }
     }
     Array[File] subset_vcfs = select_all(SubsetVcfByContig.subset_vcf)
+    Array[File] subset_vcf_indices = select_all(SubsetVcfByContig.subset_vcf_index)
   }
 
   call SubsetSamples {
@@ -138,39 +142,48 @@ workflow DeNovoSvs {
       runtime_attr_override = runtime_override_subset_samples
   }
 
-  Array[File] to_filter_vcfs = select_first([subset_vcfs, vcfs])
-  scatter (vcf in to_filter_vcfs) {
-    call PreFilterVcf {
-      input:
-        vcf = vcf,
-        max_cohort_af = max_cohort_af,
-        max_gnomad_af = max_gnomad_af,
-        blacklists = blacklists,
-        blacklist_overlap = blacklist_overlap,
-        gd_regions = gd_regions,
-        samples = SubsetSamples.sample_subset,
-        sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_filter_vcf
-    }
-  }
-
-  Array[File] filtered_vcfs = select_all(PreFilterVcf.filtered_vcf)
-  Array[File] filtered_vcf_indicies = select_all(PreFilterVcf.filtered_vcf_index)
-
-  scatter (i in range(length(filtered_vcfs))) {
+  Array[File] split_vcfs = select_first([subset_vcfs, vcfs])
+  Array[File] split_vcf_indicies = select_first([subset_vcf_indices, vcf_indices])
+  scatter (i in range(length(split_vcfs))) {
     call MatchVcfToContig {
       input:
-        vcf = filtered_vcfs[i],
-        vcf_index = filtered_vcf_indicies[i],
+        vcf = split_vcfs[i],
+        vcf_index = split_vcf_indicies[i],
         contigs = contigs,
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_match_vcf_to_contig
     }
   }
 
-  Array[File] split_vcfs = select_all(MatchVcfToContig.matched_vcf)
-  Array[File] split_vcf_indicies = select_all(MatchVcfToContig.matched_vcf_index)
+  Array[File] matched_vcfs = select_all(MatchVcfToContig.matched_vcf)
   Array[String] kept_contigs = select_all(MatchVcfToContig.matched_contig)
+  scatter (vcf in matched_vcfs) {
+    call SplitVcfBySamples {
+      input:
+        vcf = vcf,
+        proband_ids = SubsetSamples.probands,
+        parent_ids = SubsetSamples.parents,
+        sv_base_mini_docker = sv_base_mini_docker,
+        runtime_attr_override = runtime_override_split_vcf_by_samples
+    }
+
+    call FilterProbandVcf {
+      input:
+        vcf = vcf,
+        max_cohort_af = max_cohort_af,
+        max_cohort_af = max_cohort_af,
+        large_cnv_size = large_cnv_size,
+        depth_only_size = depth_only_size,
+        exclude_regions = exclude_regions,
+        exclude_regions_ovp = exclude_regions_ovp,
+        gd_regions = gd_regions,
+        gd_overlap = gd_overlap,
+        sv_base_mini_docker = sv_base_mini_docker,
+        runtime_attr_override = runtime_override_filter_proband_vcf
+    }
+  }
+  Array[File] filtered_vcfs = select_all(PreFilterVcf.filtered_vcf)
+  Array[File] filtered_vcf_indicies = select_all(PreFilterVcf.filtered_vcf_index)
 
   call SubsetManifestsByBatches {
     input:
@@ -331,334 +344,6 @@ workflow DeNovoSvs {
 # TASK DEFINITIONS
 ###########################
 
-# Filter the input VCF(s).
-# 1. Remove all sites that:
-#    a. Are BND or CNV
-#    b. Have an allele frequency or gnomAD allele frequency greater than the
-#       input thresholds
-#    c. Are covered by at least 50% by blacklist regions
-#    d. Not covered by at least 50% by genomic disorder regions (any site
-#       meeting this criteria will be kept, even if it would be
-#       otherwise excluded by the previous criteria)
-# 2. Remove all samples from the VCF that are not in the input samples file
-task PreFilterVcf {
-  input {
-    File vcf
-    Float max_cohort_af
-    Float max_gnomad_af
-    Array[File]? blacklists
-    Float blacklist_overlap
-    File gd_regions
-    Float gd_overlap
-    File samples
-    String sv_base_mini_docker
-    RuntimeAttr? runtime_attr_override
-  }
-
-  Float vcf_size = size(vcf, "GB")
-  Float other_size = size([gd_regions, samples], "GB") + (if defined(blacklists) then size(select_first([blacklists]), "GB") else 0)
-  RuntimeAttr default_attr = object {
-    mem_gb: 4,
-    cpu_cores: 1,
-    disk_gb: ceil(vcf_size * 2 + other_size) + 16,
-    boot_disk_gb: 8,
-    preemptible_tries: 3,
-    max_retries: 1,
-  }
-  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-  runtime {
-    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
-    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: sv_base_mini_docker
-  }
-
-  String output_vcf = "filtered-${basename(vcf)}"
-  String output_vcf_index = "${output_vcf}.tbi"
-  Array[File] bl = if defined(blacklists) then select_first([blacklists]) else []
-
-  command <<<
-    set -euo pipefail
-
-    cat2() {
-      if [[ "$1" = *.gz ]]; then
-        zcat "$1"
-      else
-        cat "$1"
-      fi
-    }
-
-    bcftools query --exclude 'SVTYPE = "BND" || SVTYPE = "CNV"' \
-      --format '%CHROM\t%POS0\t%END\t%ID\t%INFO/AF\t%INFO/gnomad_v4.1_sv_AF\n' \
-      '~{vcf}' \
-      | LC_ALL=C sort -k1,1 -k2,2n > sites.tsv
-    awk -F'\t' '$5 > af || ($6 != "." && $6 > gaf){print $4}' \
-      af=~{max_cohort_af} gaf=~{max_gnomad_af} sites.tsv > af_fail.list
-
-    cut -f 1-4 sites.tsv > sites.bed
-    
-    # Use coverage instead of intersect
-    : > blacklist_fail.list
-    bl_paths='~{if defined(blacklists) then write_lines(select_first([blacklists])) else ""}'
-    if [[ -n "${bl_paths:-}" ]]; then
-      while read -r f; do cat2 "$f"; done < "${bl_paths}" \
-        | LC_ALL=C sort -k1,1 -k2,2n > bl_merged.bed
-
-        bedtools coverage -a sites.bed -b bl_merged.bed -sorted \
-        | awk -F'\t' '$8 >= ~{blacklist_overlap} {print $4}' > blacklist_fail.list
-    fi
-
-    bedtools coverage -a sites.bed -b '~{gd_regions}' \
-      | awk -F'\t' '$8 >= ~{gd_overlap} {print $4}' > gd_pass.list
-
-    awk 'FILENAME==ARGV[1]{a[$1]} FILENAME!=ARGV[1] && !($1 in a){print}' \
-      gd_pass.list af_fail.list blacklist_fail.list > exclude.list
-
-    # we do not want to force samples because in the context of this workflow, the
-    # list of samples should only contain samples that are present in the last VCF
-    # in the array of input VCFs so if any other VCF does not have the exact same
-    # set of samples, there is an error
-    bcftools view --exclude 'SVTYPE ="BND" || SVTYPE = "CNV" || ID = @exclude.list' \
-      --output-type u '~{vcf}' \
-      | bcftools view --output-type z --output '~{output_vcf}' \
-        --no-update --samples-file '~{samples}'
-
-    read -r nrec _ < <(bcftools head --header 0 --records 1 "~{output_vcf}" | wc -l)
-    if (( nrec == 0 )); then
-      echo 'filtering VCF removed all sites'
-      rm "~{output_vcf}"
-    else
-      bcftools index --tbi '~{output_vcf}'
-    fi
-  >>>
-
-  output {
-    File? filtered_vcf = output_vcf
-    File? filtered_vcf_index = output_vcf_index
-  }
-}
-
-# Retrieve a single contig from a VCF.
-task SubsetVcfByContig {
-  input {
-    File vcf
-    File vcf_index
-    String contig
-    String sv_base_mini_docker
-    RuntimeAttr? runtime_attr_override
-  }
-
-  Float input_size = size([vcf, vcf_index], "GB")
-  RuntimeAttr default_attr = object {
-    mem_gb: 1,
-    cpu_cores: 1,
-    disk_gb: ceil(input_size * 1.1) + 16,
-    boot_disk_gb: 8,
-    preemptible_tries: 3,
-    max_retries: 1,
-  }
-  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-  runtime {
-    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
-    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: sv_base_mini_docker
-  }
-
-  String contig_vcf = "${contig}.vcf.gz"
-
-  command <<<
-    set -euo pipefail
-
-    bcftools view --regions '~{contig}' --output-type z --output '~{contig_vcf}' \
-      '~{vcf}'
-
-    read -r nrec < <(bcftools head --header 0 --records 1 "${contig_vcf}" | wc -l)
-    if (( nrec == 0 )); then
-      rm "${contig_vcf}"
-    fi
-  >>>
-
-  output {
-    File? subset_vcf = contig_vcf
-  } 
-}
-
-# Find out which contig, among a set, a VCF contains. If the VCF contains more
-# than one contig, the task will error. If the VCF does not contain any of the
-# given contigs, it will not produce an output.
-task MatchVcfToContig {
-  input {
-    File vcf
-    File vcf_index
-    Array[String] contigs
-    String sv_base_mini_docker
-    RuntimeAttr? runtime_attr_override
-
-    # NOT AN INPUT! Only exists to create an optional type for use in outputs.
-    String? null
-  }
-
-  Float input_size = size([vcf, vcf_index], "GB")
-  RuntimeAttr default_attr = object {
-    mem_gb: 1,
-    cpu_cores: 1,
-    disk_gb: ceil(input_size) + 16,
-    boot_disk_gb: 8,
-    preemptible_tries: 3,
-    max_retries: 1,
-  }
-  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-  runtime {
-    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb])+ " GB"
-    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
-    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: sv_base_mini_docker
-  }
-
-  String vcf_bn = basename(vcf)
-  String vcf_index_bn = basename(vcf_index)
-
-  command <<<
-    set -euo pipefail
-
-    bcftools index --stats '~{vcf}' | cut -f 1 > contigs_in_vcf.list
-    read -r vcf_contigs_count _ < <(wc -l contigs_in_vcf.list)
-    unset -v other
-    if (( vcf_contigs_count != 1 )); then
-      printf 'VCF must contain exactly 1 contig. Found %d\n' "${vcf_contigs_count}" >&2
-      exit 1
-    fi
-
-    awk 'NR==FNR{a=$1} NR>FNR && (a==$1){print a; exit 0}' \
-      contigs_in_vcf.list \
-      '~{write_lines(contigs)}' > matched_contig.list
-
-    # If the contig in the VCF matched one of the input contigs, then
-    # matched_contig.list should contain the matched contig and have a non-zero
-    # filesize.
-    mv '~{vcf}' '~{vcf_bn}'
-    mv '~{vcf_index}' '~{vcf_index_bn}'
-    if [[ ! -s matched_contig.list ]]; then
-      printf '\n' > matched_contig.list
-      rm '~{vcf_bn}'
-      rm '~{vcf_index_bn}'
-    fi
-  >>>
-
-  # There doesn't seem to be way in the WDL language to specify an optional
-  # `String` output without this hack of using a fake input for its optional
-  # type. The `read_string` function will always return `String`, not
-  # `String?` because it will error if its argument file does not exist. This
-  # problematic because this task relies on outputting optional values to
-  # indicate that a VCF did not match a contig.
-  output {
-    File? matched_vcf = vcf_bn
-    File? matched_vcf_index = vcf_index_bn
-    String? matched_contig = if read_string("matched_contig.list") == "" then null else read_string("matched_contig.list")
-  }
-}
-
-# Subset the pedigree, samples and batches so they are all synchronized.
-# 1. Subset the pedigree to trios.
-# 2. Subset the pedigree by families, if present.
-# 3. Subset the pedigree to trios for which all members are in the VCF.
-# 4. Subset the samples in the VCF to samples that are also in the pedigree.
-# 5. Subset the batch manifest to batches with samples in the list from 4.
-task SubsetSamples {
-  input {
-    File ped
-    File? fams
-    File vcf
-    File batch_manifest
-    String sv_base_mini_docker
-    RuntimeAttr? runtime_attr_override
-  }
-
-  Float input_size = size(select_all([ped, fams, vcf, batch_manifest]), "GB")
-  RuntimeAttr default_attr = object {
-    mem_gb: 2,
-    cpu_cores: 1,
-    disk_gb: ceil(input_size) + 16,
-    boot_disk_gb: 8,
-    preemptible_tries: 3,
-    max_retries: 1,
-  }
-  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-  runtime {
-    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
-    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: sv_base_mini_docker
-  }
-
-  command <<<
-    set -euo pipefail
-
-    fam_ids='~{if defined(fams) then fams else ""}'
-    awk -F'\t' '$2 && $3 && $4' '~{ped}' > trios.ped
-    ped=trios.ped
-    
-    if [[ -n "${fam_ids:-}" && -s "${fam_ids}" ]]; then
-      awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a)' "${fam_ids}" "${ped}" > fam_subset.ped
-      ped=fam_subset.ped
-    fi
-
-    bcftools query --list-samples '~{vcf}' | LC_ALL=C sort > vcf_samples.list
-    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($2 in a) && ($3 in a) && ($4 in a)' \
-      vcf_samples.list "${ped}" > subset.ped
-
-    awk -F'\t' '{print $2; print $3; print $4}' subset.ped \
-      | LC_ALL=C sort > ped_samples.list
-
-    LC_ALL=C comm -12 ped_samples.list vcf_samples.list > sample_subset.list
-
-    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($2 in a){print $1}' \
-      sample_subset.list '~{batch_manifest}' \
-      | LC_ALL=C sort -u > batch_subset.list
-
-    read -r ped_n _ < <(wc -l subset.ped)
-    if (( ped_n == 0 )); then
-      printf 'pedigree is empty\n' >&2
-      exit 1
-    fi
-
-    read -r sample_n _ < <(wc -l sample_subset.list)
-    if (( sample_n == 0 )); then
-      printf 'sample set is empty\n' >&2
-      exit 1
-    fi
-
-    read -r batch_n _ < <(wc -l batch_subset.list)
-    if (( batch_n == 0 )); then
-      printf 'batch set is empty\n' >&2
-      exit 1
-    fi
-  >>>
-
-  output {
-    File ped_subset = "subset.ped"
-    File sample_subset = "sample_subset.list"
-    File batch_subset = "batch_subset.list"
-  }
-}
-
 # Convert the input arrays into files that are needed by other tasks in the workflow.
 task MakeManifests {
   input {
@@ -753,6 +438,407 @@ task MakeManifests {
     File pesr_manifest = "pesr_manifest.tsv"
     File bincov_manifest = "bincov_manifest.tsv"
     File sample_manifest = "sample_manifest.tsv"
+  }
+}
+
+# Retrieve a single contig from a VCF.
+task SubsetVcfByContig {
+  input {
+    File vcf
+    File vcf_index
+    String contig
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float input_size = size([vcf, vcf_index], "GB")
+  RuntimeAttr default_attr = object {
+    mem_gb: 1,
+    cpu_cores: 1,
+    disk_gb: ceil(input_size * 1.1) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
+  }
+
+  String contig_vcf = "${contig}.vcf.gz"
+  String contig_vcf_index = contig_vcf + ".tbi"
+
+  command <<<
+    set -euo pipefail
+
+    bcftools view --regions '~{contig}' --output-type z --output '~{contig_vcf}' \
+      '~{vcf}'
+
+    read -r nrec < <(bcftools head --header 0 --records 1 '~{contig_vcf}' | wc -l)
+    if (( nrec == 0 )); then
+      rm '~{contig_vcf}'
+      exit 0
+    fi
+    bcftools index --tbi '~{contig_vcf}'
+  >>>
+
+  output {
+    File? subset_vcf = contig_vcf
+    File? subset_vcf_index = contig_vcf_index
+  }
+}
+
+# Subset the pedigree, samples and batches so they are all synchronized.
+# 1. Subset the pedigree to trios.
+# 2. Subset the pedigree by families, if present.
+# 3. Subset the pedigree to trios for which all members are in the VCF.
+# 4. Subset the samples in the VCF to samples that are also in the pedigree.
+# 5. Subset the batch manifest to batches with samples in the list from 4.
+task SubsetSamples {
+  input {
+    File ped
+    File? fams
+    File vcf
+    File batch_manifest
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float input_size = size(select_all([ped, fams, vcf, batch_manifest]), "GB")
+  RuntimeAttr default_attr = object {
+    mem_gb: 2,
+    cpu_cores: 1,
+    disk_gb: ceil(input_size) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
+  }
+
+  command <<<
+    set -euo pipefail
+
+    fam_ids='~{if defined(fams) then fams else ""}'
+    awk -F'\t' '$2 && $3 && $4' '~{ped}' > trios.ped
+    ped=trios.ped
+    
+    if [[ -n "${fam_ids:-}" && -s "${fam_ids}" ]]; then
+      awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a)' "${fam_ids}" "${ped}" > fam_subset.ped
+      ped=fam_subset.ped
+    fi
+
+    bcftools query --list-samples '~{vcf}' | LC_ALL=C sort > vcf_samples.list
+    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($2 in a) && ($3 in a) && ($4 in a)' \
+      vcf_samples.list "${ped}" > subset.ped
+
+    awk -F'\t' '{print $2; print $3; print $4}' subset.ped \
+      | LC_ALL=C sort > ped_samples.list
+
+    LC_ALL=C comm -12 ped_samples.list vcf_samples.list > sample_subset.list
+
+    awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($2 in a){print $1}' \
+      sample_subset.list '~{batch_manifest}' \
+      | LC_ALL=C sort -u > batch_subset.list
+
+    read -r ped_n _ < <(wc -l subset.ped)
+    if (( ped_n == 0 )); then
+      printf 'pedigree is empty\n' >&2
+      exit 1
+    fi
+
+    read -r sample_n _ < <(wc -l sample_subset.list)
+    if (( sample_n == 0 )); then
+      printf 'sample set is empty\n' >&2
+      exit 1
+    fi
+
+    read -r batch_n _ < <(wc -l batch_subset.list)
+    if (( batch_n == 0 )); then
+      printf 'batch set is empty\n' >&2
+      exit 1
+    fi
+
+    awk -F'\t' '{print $2 > "probands.list"; print $3 > "parents.list"; print $4 > "parents.list"}' \
+      subset.ped
+  >>>
+
+  output {
+    File ped_subset = "subset.ped"
+    File probands = "probands.list"
+    File parents = "parents.list"
+    File sample_subset = "sample_subset.list"
+    File batch_subset = "batch_subset.list"
+  }
+}
+
+task SplitVcfBySamples {
+  input {
+    File vcf
+    File proband_ids
+    File parent_ids
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float vcf_size = size(vcf, "GB")
+  Float other_size = size(pedigree, "GB")
+  RuntimeAttr default_attr = object {
+    mem_gb: 2,
+    cpu_cores: 1,
+    disk_gb: ceil(vcf_size * 2.5 + other_size) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
+  }
+
+  String proband_output = "proband-" + basename(vcf)
+  String parent_output = "parent-" + basename(vcf)
+  command <<<
+    bcftools view --output-type z --output '~{proband_output}' \
+      --no-update --samples-file '~{proband_ids}'
+    bcftools view --output-type z --output '~{parent_output}' \
+      --no-update --samples-file '~{parent_ids}'
+  >>>
+
+  output {
+    File proband_vcf = proband_output
+    File parental_vcf = parent_output
+  }
+}
+
+# Filter a proband VCF for candidate de novo SVs.
+# 1. Remove all BND and mCNV sites
+# 2. Remove all sites that:
+#    a. have an cohort or gnomAD allele frequency greater than the input
+#       thresholds
+#    b. are overlapped by exclude regions by a minimum of
+#       `exclude_regions_ovp` fraction of the SV
+#    c. small CNVs that are SR-only and don't have BOTHSIDES_SUPPORT
+#    d. are depth-only DUPs and are smaller than the depth-only size threshold
+#    e. are not covered by genomic disorder regions by a minimum of
+#       `gd_overlap` fraction of the SV (any site meeting this criteria will be
+#       kept, even if it would otherwise excluded by the previous criteria)
+#    f. are not CPX or CTX
+# 3. Set genotypes to missing where:
+#    a. SV type is INS and algorithm is Manta or MELT and evidence is SR-only
+#       and GQ = 0
+#    b. evidence is Wham-only and GQ = 1
+#    c. SV type is DEL and RD_CN is 2 or 3 and evidence is PE
+task FilterProbandVcf {
+  input {
+    File vcf
+    Float max_cohort_af
+    Float max_gnomad_af
+    Int large_cnv_size
+    Int depth_only_size
+    Array[File]? exclude_regions
+    Float exclude_regions_ovp
+    File gd_regions
+    Float gd_overlap
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float vcf_size = size(vcf, "GB")
+  Float other_size = size(gd_regions, "GB") + (if defined(exlude_regions) then size(select_first([exlude_regions]), "GB") else 0)
+  RuntimeAttr default_attr = object {
+    mem_gb: 4,
+    cpu_cores: 2,
+    disk_gb: ceil(vcf_size * 2 + other_size) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
+  }
+
+  String output_vcf = "${basename(vcf)}"
+  String output_vcf_index = "${output_vcf}.tbi"
+  Array[File] bl = if defined(exlude_regions) then select_first([exlude_regions]) else []
+
+  command <<<
+    set -euo pipefail
+
+    cat2() {
+      if [[ "$1" = *.gz ]]; then
+        zcat "$1"
+      else
+        cat "$1"
+      fi
+    }
+
+    bcftools view --exclude 'SVTYPE = "BND" || SVTYPE = "CNV"' \
+      --drop-genotypes --output-type b --output sites_only.bcf '~{vcf}'
+    bcftools query \
+      --include 'AF > ~{max_cohort_af} || gnomad_v4.1_sv_AF = "." || gnomad_v4.1_sv_AF > ~{max_gnomad_af}' \
+      --format '%ID\n'
+      sites_only.bcf > af_fail
+    bcftools view \
+      --include '(SVTYPE = "DEL" || SVTYPE = "DUP") && (EVIDENCE = "RD,SR" && EVIDENCE = "SR") && SVLEN < ~{large_cnv_size}' \
+      --output-type u \
+      sites_only.bcf \
+      | bcftools query --exclude 'BOTHSIDES_SUPPORT = 1' --format '%ID\n' > bothsides_fail
+    bcftools query \
+      --include 'SVTYPE = "DUP" && ALGORITHMS = "depth" && SVLEN < ~{depth_only_size}' \
+      --format '%ID\n'
+      sites_only.bcf > depth_only_fail
+    
+    bcftools query --format '%CHROM\t%POS0\t%END\t%ID\n' sites_only.bcf > sites.bed
+    cut -f 1-4 sites.tsv > sites.bed
+    
+    : > exclude_regions_fail
+    er_paths='~{if defined(exclude_regions) then write_lines(select_first([exclude_regions])) else ""}'
+    if [[ -n "${er_paths:-}" ]]; then
+      while read -r f; do cat2 "${f}"; done < "${er_paths}" \
+        | LC_ALL=C sort -k1,1 -k2,2n > er_merged.bed
+
+        bedtools coverage -a sites.bed -b er_merged.bed -sorted \
+          | awk -F'\t' '$8 >= ovp {print $4}' ovp=~{exclude_regions_ovp} >> exclude_regions_fail
+    fi
+
+    bedtools coverage -a sites.bed -b '~{gd_regions}' \
+      | awk -F'\t' '$8 >= ~{gd_overlap} {print $4}' > gd_pass
+    bcftools query --include 'SVTYPE = "CPX" || SVTYPE = "CTX"' \
+      --format '%ID\n' sites_only.bcf > cpx_ctx_pass
+
+    cat gd_pass cpx_ctx_pass | sort -u > whitelist
+    cat af_fail bothsides_fail depth_only_fail exclude_regions_fail | sort -u > blacklist
+    comm -13 whitelist blacklist > blacklist_clean
+
+    bcftools view --exclude 'ID = "@blacklist_clean"' --output-type u '~{vcf}' \
+      | bcftools plugin setGT --output-type u - -- \
+          --target-gt q --new-gt . \
+          --include 'SVTYPE = "INS" & (ALGORITHM = "manta" | ALGORITHM = "melt") & (EVIDENCE = "RD,SR" | EVIDENCE = "SR") & HIGH_SR_BACKGROUND = 1 & GQ = 0' \
+      | bcftools plugin setGT --output-type u - -- \
+          --target-gt q --new-gt . \
+          --include 'EVIDENCE = "wham" & GQ = 1' \
+      | bcftools plugin setGT --output-type z --output '~{output_vcf}' - -- \
+          --target-gt q --new-gt . \
+          --include 'SVTYPE = "DEL" & (RD_CN = 2 | RD_CN = 3) & EVIDENCE = "PE"'
+
+    read -r nrec _ < <(bcftools head --header 0 --records 1 "~{output_vcf}" | wc -l)
+    if (( nrec == 0 )); then
+      printf 'filtering VCF removed all sites\n' >&2
+      rm "~{output_vcf}"
+    else
+      bcftools index --tbi '~{output_vcf}'
+    fi
+  >>>
+
+  output {
+    File? filtered_vcf = output_vcf
+    File? filtered_vcf_index = output_vcf_index
+  }
+}
+
+# Find out which contig, among a set, a VCF contains. If the VCF contains more
+# than one contig, the task will error. If the VCF does not contain any of the
+# given contigs, it will not produce an output.
+task MatchVcfToContig {
+  input {
+    File vcf
+    File vcf_index
+    Array[String] contigs
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
+
+    # NOT AN INPUT! Only exists to create an optional type for use in outputs.
+    String? null
+  }
+
+  Float input_size = size([vcf, vcf_index], "GB")
+  RuntimeAttr default_attr = object {
+    mem_gb: 1,
+    cpu_cores: 1,
+    disk_gb: ceil(input_size) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb])+ " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
+  }
+
+  String vcf_bn = basename(vcf)
+
+  command <<<
+    set -euo pipefail
+
+    bcftools index --stats '~{vcf}' | cut -f 1 > contigs_in_vcf.list
+    read -r vcf_contigs_count _ < <(wc -l contigs_in_vcf.list)
+    if (( vcf_contigs_count != 1 )); then
+      printf 'VCF must contain exactly 1 contig. Found %d\n' "${vcf_contigs_count}" >&2
+      exit 1
+    fi
+
+    awk 'NR==FNR{a=$1} NR>FNR && (a==$1){print a; exit 0}' \
+      contigs_in_vcf.list \
+      '~{write_lines(contigs)}' > matched_contig.list
+
+    # If the contig in the VCF matched one of the input contigs, then
+    # matched_contig.list should contain the matched contig and have a non-zero
+    # filesize.
+    mv '~{vcf}' '~{vcf_bn}'
+    if [[ ! -s matched_contig.list ]]; then
+      printf '\n' > matched_contig.list
+      rm '~{vcf_bn}'
+    fi
+  >>>
+
+  # There doesn't seem to be way in the WDL language to specify an optional
+  # `String` output without this hack of using a fake input for its optional
+  # type. The `read_string` function will always return `String`, not
+  # `String?` because it will error if its argument file does not exist. This
+  # problematic because this task relies on outputting optional values to
+  # indicate that a VCF did not match a contig.
+  output {
+    File? matched_vcf = vcf_bn
+    String? matched_contig = if read_string("matched_contig.list") == "" then null else read_string("matched_contig.list")
   }
 }
 
