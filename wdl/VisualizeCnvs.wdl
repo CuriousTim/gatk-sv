@@ -47,7 +47,7 @@ workflow VisualizeCnvs {
   }
 
   scatter (i in range(length(rd_files))) {
-    call SubsetRDMatrices {
+    call SubsetRdMatrix {
       input:
         rd_file = rd_files[i],
         rd_file_index = rd_file_indicies[i],
@@ -62,8 +62,8 @@ workflow VisualizeCnvs {
     call RdTestPlot {
       input:
         variants = shard,
-        rd_files = SubsetRDMatrices.rd_subset,
-        rd_file_indicies = SubsetRDMatrices.rd_subset_index,
+        rd_files = SubsetRdMatrix.rd_subset,
+        rd_file_indicies = SubsetRdMatrix.rd_subset_index,
         median_files = median_files,
         sample_table = sample_table,
         plot_prefix = plot_prefix,
@@ -197,7 +197,7 @@ task ShardVariants {
   }
 }
 
-task SubsetRDMatrices {
+task SubsetRdMatrix {
   input {
     File rd_file
     File rd_file_index
@@ -208,7 +208,7 @@ task SubsetRDMatrices {
 
   RuntimeAttr default_attr = object {
     cpu_cores: 1,
-    mem_gb: 2,
+    mem_gb: 4,
     disk_gb: ceil(size(rd_file, "GB") + size(rd_file_index, "GB") + size(intervals, "GB")) + 16,
     boot_disk_gb: 16,
     preemptible_tries: 3,
@@ -233,7 +233,7 @@ task SubsetRDMatrices {
     set -o nounset
     set -o pipefail
 
-    cat '~{intervals}' | xargs cat | sort -k1,1 -k2,2n | bedtools merge -i stdin -d 101 > intervals.bed
+    cat '~{write_lines(intervals)}' | xargs cat | sort -k1,1 -k2,2n | bedtools merge -i stdin -d 101 > intervals.bed
     tabix --print-header --regions intervals.bed '~{rd_file}' \
       | awk '/^#/{print "0\t0\t0\t" $0; next} 1' \
       | LC_ALL=C sort --unique -t$'\t' -k1,1 -k2,2n -k3,3n \
