@@ -88,7 +88,7 @@ workflow DeNovoSvs {
           vcf = vcfs[0],
           vcf_index = vcf_indices[0],
           contig = contigs[i],
-          sv_base_mini_docker = sv_base_mini_docker,
+          denovo_docker = denovo_docker,
           runtime_attr_override = runtime_override_subset_vcf_by_contig
       }
     }
@@ -325,7 +325,7 @@ task SubsetVcfByContig {
     File vcf
     File vcf_index
     String contig
-    String sv_base_mini_docker
+    String denovo_docker
     RuntimeAttr? runtime_attr_override
   }
 
@@ -347,7 +347,7 @@ task SubsetVcfByContig {
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
     preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
     maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: sv_base_mini_docker
+    docker: denovo_docker
   }
 
   String contig_vcf = "${contig}.vcf.gz"
