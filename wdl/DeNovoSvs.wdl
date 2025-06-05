@@ -135,7 +135,7 @@ workflow DeNovoSvs {
       input:
         vcf = vcf,
         max_cohort_af = max_cohort_af,
-        max_cohort_af = max_cohort_af,
+        max_gnomad_af = max_gnomad_af,
         large_cnv_size = large_cnv_size,
         depth_only_size = depth_only_size,
         exclude_regions = exclude_regions,
