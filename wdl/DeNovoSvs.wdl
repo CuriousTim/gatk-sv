@@ -133,7 +133,7 @@ workflow DeNovoSvs {
 
     call FilterProbandVcf {
       input:
-        vcf = vcf,
+        vcf = SplitVcfBySamples.proband_vcf,
         max_cohort_af = max_cohort_af,
         max_gnomad_af = max_gnomad_af,
         large_cnv_size = large_cnv_size,
@@ -148,7 +148,7 @@ workflow DeNovoSvs {
 
     call SplitProbandVcfByBatch {
       input:
-        vcf = select_first([FilterProbandVcf.filtered_vcf]),
+        vcf = FilterProbandVcf.filtered_vcf,
         sample_manifest = MakeManifests.sample_manifest,
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_split_proband_vcf_by_batch
