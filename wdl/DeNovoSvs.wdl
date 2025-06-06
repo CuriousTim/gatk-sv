@@ -508,18 +508,16 @@ task FilterVcfSites {
   command <<<
     set -euxo pipefail
     bcftools view --exclude 'SVTYPE = "BND" || SVTYPE = "CNV"' \
-      --threads ~{cpus} --output-type b --output tmp.bcf
+      --threads ~{cpus} --output-type b --output tmp.bcf '~{vcf}'
 
     bcftools view --exclude 'SVTYPE = "CPX" || SVTYPE = "CTX"' \
       --threads ~{cpus} --output-type b --output '~{output_name}' tmp.bcf
-    bcftools index --tbi '~{output_name}'
     bcftools view --include 'SVTYPE = "CPX" || SVTYPE = "CTX"' \
       --threads ~{cpus} --output-type z --output '~{cpx_output_name}' tmp.bcf
   >>>
 
   output {
     File filtered_bcf = output_name
-    File filtered_bcf_index = output_name + ".tbi"
     File cpx_vcf = cpx_output_name
   }
 }
