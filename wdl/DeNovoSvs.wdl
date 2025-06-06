@@ -26,7 +26,7 @@ workflow DeNovoSvs {
     Array[File]? exclude_regions
     Float exclude_regions_ovp = 0.5
 
-    Int large_cnv_size = 5000
+    Int large_cnv_size = 1000
     Int depth_only_size = 5000
 
     # Either a single VCF or an array of VCFs with each one containing a single
@@ -61,9 +61,10 @@ workflow DeNovoSvs {
     RuntimeAttr? runtime_override_subset_vcf_by_contig
     RuntimeAttr? runtime_override_subset_samples
     RuntimeAttr? runtime_override_match_vcf_to_contig
-    RuntimeAttr? runtime_override_split_vcf_by_samples
-    RuntimeAttr? runtime_override_filter_proband_vcf
-    RuntimeAttr? runtime_override_split_proband_vcf_by_batch
+    RuntimeAttr? runtime_override_filter_bcf_sites
+    RuntimeAttr? runtime_override_split_bcf_by_samples
+    RuntimeAttr? runtime_override_filter_proband_bcf
+    RuntimeAttr? runtime_override_split_proband_bcf_by_batch
   }
 
   call MakeManifests {
@@ -122,18 +123,25 @@ workflow DeNovoSvs {
   Array[File] matched_vcfs = select_all(MatchVcfToContig.matched_vcf)
   Array[String] kept_contigs = select_all(MatchVcfToContig.matched_contig)
   scatter (vcf in matched_vcfs) {
-    call SplitVcfBySamples {
+    call FilterVcfSites {
       input:
         vcf = vcf,
+        sv_base_mini_docker = sv_base_mini_docker,
+        runtime_attr_override = runtime_override_filter_bcf_sites
+    }
+
+    call SplitBcfBySamples {
+      input:
+        bcf = FilterVcfSites.filtered_bcf,
         proband_ids = SubsetSamples.probands,
         parent_ids = SubsetSamples.parents,
         sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_split_vcf_by_samples
+        runtime_attr_override = runtime_override_split_bcf_by_samples
     }
 
-    call FilterProbandVcf {
+    call FilterProbandBcf {
       input:
-        vcf = SplitVcfBySamples.proband_vcf,
+        bcf = SplitBcfBySamples.proband_bcf,
         max_cohort_af = max_cohort_af,
         max_gnomad_af = max_gnomad_af,
         large_cnv_size = large_cnv_size,
@@ -143,32 +151,31 @@ workflow DeNovoSvs {
         gd_regions = gd_regions,
         gd_overlap = gd_overlap,
         sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_filter_proband_vcf
+        runtime_attr_override = runtime_override_filter_proband_bcf
     }
 
-    call SplitProbandVcfByBatch {
+    call SplitProbandBcfByBatch {
       input:
-        vcf = FilterProbandVcf.filtered_vcf,
+        bcf = FilterProbandBcf.filtered_bcf,
+        batch_n = length(batch_name_list),
         sample_manifest = MakeManifests.sample_manifest,
         sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_split_proband_vcf_by_batch
+        runtime_attr_override = runtime_override_split_proband_bcf_by_batch
     }
   }
-  
+
   # [
   #   [ contig0-batch0, contig0-batch1, contig0-batch2, ...],
   #   [ contig1-batch0, contig1-batch1, contig1-batch2, ...],   <--+
   #   ...                                                           \
   # ]                                                               |
-  #                                                                 |
   #                                                           transpose
-  #                                                                 |
   # [                                                               |
   #   [ contig0-batch0, contig1-batch0, contig2-batch0, ...],       /
   #   [ contig0-batch1, contig1-batch1, contig2-batch1, ...],   <--+
   #   ...
   # ]
-  Array[Array[File]] batched_proband_vcfs = transpose(SplitProbandVcfByBatch.split_vcfs)
+  Array[Array[File]] batched_proband_bcfs = transpose(SplitProbandBcfByBatch.split_bcfs)
   # scatter (batch_vcfs in batched_proband_vcfs) {
   #   if (size(batch_vcfs) > 0) {
   #     String batch_id = basename(batch_vcfs[0], ".vcf.gz")
@@ -184,7 +191,7 @@ workflow DeNovoSvs {
   # }
 
   output {
-    Array[Array[File]] probands = batched_proband_vcfs
+    Array[Array[File]] probands = batched_proband_bcfs
   }
 }
 
@@ -239,7 +246,7 @@ task MakeManifests {
   }
 
   command <<<
-    set -euo pipefail
+    set -euxo pipefail
 
     batch_names='~{write_lines(batch_name_list)}'
 
@@ -351,10 +358,9 @@ task SubsetVcfByContig {
   }
 
   String contig_vcf = "${contig}.vcf.gz"
-  String contig_vcf_index = contig_vcf + ".tbi"
 
   command <<<
-    set -euo pipefail
+    set -euxo pipefail
 
     bcftools view --regions '~{contig}' --output-type z --output '~{contig_vcf}' \
       '~{vcf}'
@@ -369,7 +375,7 @@ task SubsetVcfByContig {
 
   output {
     File? subset_vcf = contig_vcf
-    File? subset_vcf_index = contig_vcf_index
+    File? subset_vcf_index = contig_vcf + ".tbi"
   }
 }
 
@@ -411,12 +417,12 @@ task SubsetSamples {
   }
 
   command <<<
-    set -euo pipefail
+    set -euxo pipefail
 
     fam_ids='~{if defined(fams) then fams else ""}'
     awk -F'\t' '$2 && $3 && $4' '~{ped}' > trios.ped
     ped=trios.ped
-    
+
     if [[ -n "${fam_ids:-}" && -s "${fam_ids}" ]]; then
       awk -F'\t' 'NR==FNR{a[$1]} NR>FNR && ($1 in a)' "${fam_ids}" "${ped}" > fam_subset.ped
       ped=fam_subset.ped
@@ -466,30 +472,29 @@ task SubsetSamples {
   }
 }
 
-task SplitVcfBySamples {
+# Remove BND and mCNV sites and create a BCF file without any CPX or CTX sites
+# and a VCF with only the CPX and CTX sites
+task FilterVcfSites {
   input {
     File vcf
-    File proband_ids
-    File parent_ids
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
 
-  Float vcf_size = size(vcf, "GB")
-  Float other_size = size([proband_ids, parent_ids], "GB")
   RuntimeAttr default_attr = object {
-    mem_gb: 2,
-    cpu_cores: 1,
-    disk_gb: ceil(vcf_size * 2.5 + other_size) + 16,
+    mem_gb: 4,
+    cpu_cores: 4,
+    disk_gb: ceil(size(vcf, "GB") * 3)  + 16,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
   }
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+  Int cpus = select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
 
   runtime {
     memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    cpu: cpus
     disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
     preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
@@ -497,18 +502,73 @@ task SplitVcfBySamples {
     docker: sv_base_mini_docker
   }
 
-  String proband_output = "proband-" + basename(vcf)
-  String parent_output = "parent-" + basename(vcf)
+  String output_name = basename(vcf, ".vcf.gz") + ".bcf"
+  String cpx_output_name = "cpx_ctx-" + basename(vcf)
+
   command <<<
-    bcftools view --output-type z --output '~{proband_output}' \
-      --no-update --samples-file '~{proband_ids}'
-    bcftools view --output-type z --output '~{parent_output}' \
-      --no-update --samples-file '~{parent_ids}'
+    set -euxo pipefail
+    bcftools view --exclude 'SVTYPE = "BND" || SVTYPE = "CNV"' \
+      --threads ~{cpus} --output-type b --output tmp.bcf
+
+    bcftools view --exclude 'SVTYPE = "CPX" || SVTYPE = "CTX"' \
+      --threads ~{cpus} --output-type b --output '~{output_name}' tmp.bcf
+    bcftools index --tbi '~{output_name}'
+    bcftools view --include 'SVTYPE = "CPX" || SVTYPE = "CTX"' \
+      --threads ~{cpus} --output-type z --output '~{cpx_output_name}' tmp.bcf
   >>>
 
   output {
-    File proband_vcf = proband_output
-    File parental_vcf = parent_output
+    File filtered_bcf = output_name
+    File filtered_bcf_index = output_name + ".tbi"
+    File cpx_vcf = cpx_output_name
+  }
+}
+
+task SplitBcfBySamples {
+  input {
+    File bcf
+    File proband_ids
+    File parent_ids
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float bcf_size = size(bcf, "GB")
+  Float other_size = size([proband_ids, parent_ids], "GB")
+  RuntimeAttr default_attr = object {
+    mem_gb: 4,
+    cpu_cores: 4,
+    disk_gb: ceil(bcf_size * 4 + other_size) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+  Int cpus = select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+
+  runtime {
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+    cpu: cpus
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
+  }
+
+  String proband_output = "proband-" + basename(bcf)
+  String parent_output = "parent-" + basename(bcf)
+
+  command <<<
+    bcftools view --output-type b --output '~{proband_output}' \
+      --threads ~{cpus} --no-update --samples-file '~{proband_ids}'
+    bcftools view --output-type b --output '~{parent_output}' \
+      --threads ~{cpus} --no-update --samples-file '~{parent_ids}'
+  >>>
+
+  output {
+    File proband_bcf = proband_output
+    File parental_bcf = parent_output
   }
 }
 
@@ -551,7 +611,7 @@ task MatchVcfToContig {
   String vcf_bn = basename(vcf)
 
   command <<<
-    set -euo pipefail
+    set -euxo pipefail
 
     bcftools index --stats '~{vcf}' | cut -f 1 > contigs_in_vcf.list
     read -r vcf_contigs_count _ < <(wc -l contigs_in_vcf.list)
@@ -586,9 +646,8 @@ task MatchVcfToContig {
   }
 }
 
-# Filter a proband VCF for candidate de novo SVs.
-# 1. Remove all BND and mCNV sites
-# 2. Remove all sites that:
+# Filter a proband BCF for candidate de novo SVs.
+# 1. Remove all sites that:
 #    a. have an cohort or gnomAD allele frequency greater than the input
 #       thresholds
 #    b. are overlapped by exclude regions by a minimum of
@@ -598,15 +657,14 @@ task MatchVcfToContig {
 #    e. are not covered by genomic disorder regions by a minimum of
 #       `gd_overlap` fraction of the SV (any site meeting this criteria will be
 #       kept, even if it would otherwise excluded by the previous criteria)
-#    f. are not CPX or CTX
-# 3. Set genotypes to missing where:
+# 2. Set genotypes to missing where:
 #    a. SV type is INS and algorithm is Manta or MELT and evidence is SR-only
 #       and GQ = 0
 #    b. evidence is Wham-only and GQ = 1
 #    c. SV type is DEL and RD_CN is 2 or 3 and evidence is PE
-task FilterProbandVcf {
+task FilterProbandBcf {
   input {
-    File vcf
+    File bcf
     Float max_cohort_af
     Float max_gnomad_af
     Int large_cnv_size
@@ -619,12 +677,12 @@ task FilterProbandVcf {
     RuntimeAttr? runtime_attr_override
   }
 
-  Float vcf_size = size(vcf, "GB")
+  Float bcf_size = size(bcf, "GB")
   Float other_size = size(gd_regions, "GB") + (if defined(exclude_regions) then size(select_first([exclude_regions]), "GB") else 0)
   RuntimeAttr default_attr = object {
     mem_gb: 4,
     cpu_cores: 2,
-    disk_gb: ceil(vcf_size * 2 + other_size) + 16,
+    disk_gb: ceil(bcf_size * 4 + other_size) + 16,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
@@ -641,12 +699,11 @@ task FilterProbandVcf {
     docker: sv_base_mini_docker
   }
 
-  String output_vcf = "${basename(vcf)}"
-  String output_vcf_index = "${output_vcf}.tbi"
+  String output_bcf = basename(bcf)
   Array[File] bl = if defined(exclude_regions) then select_first([exclude_regions]) else []
 
   command <<<
-    set -euo pipefail
+    set -euxo pipefail
 
     cat2() {
       if [[ "$1" = *.gz ]]; then
@@ -656,11 +713,11 @@ task FilterProbandVcf {
       fi
     }
 
-    bcftools view --exclude 'SVTYPE = "BND" || SVTYPE = "CNV"' \
-      --drop-genotypes --output-type b --output sites_only.bcf '~{vcf}'
+    bcftools view --drop-genotypes --output-type b --output sites_only.bcf '~{bcf}'
+    # TODO should missing gnomAD AF mean filter out?
     bcftools query \
       --include 'AF > ~{max_cohort_af} || gnomad_v4.1_sv_AF = "." || gnomad_v4.1_sv_AF > ~{max_gnomad_af}' \
-      --format '%ID\n'
+      --format '%ID\n' \
       sites_only.bcf > af_fail
     bcftools view \
       --include '(SVTYPE = "DEL" || SVTYPE = "DUP") && (EVIDENCE = "RD,SR" && EVIDENCE = "SR") && SVLEN < ~{large_cnv_size}' \
@@ -671,10 +728,8 @@ task FilterProbandVcf {
       --include 'SVTYPE = "DUP" && ALGORITHMS = "depth" && SVLEN < ~{depth_only_size}' \
       --format '%ID\n'
       sites_only.bcf > depth_only_fail
-    
+
     bcftools query --format '%CHROM\t%POS0\t%END\t%ID\n' sites_only.bcf > sites.bed
-    cut -f 1-4 sites.tsv > sites.bed
-    
     : > exclude_regions_fail
     er_paths='~{if defined(exclude_regions) then write_lines(select_first([exclude_regions])) else ""}'
     if [[ -n "${er_paths:-}" ]]; then
@@ -687,43 +742,43 @@ task FilterProbandVcf {
 
     bedtools coverage -a sites.bed -b '~{gd_regions}' \
       | awk -F'\t' '$8 >= ~{gd_overlap} {print $4}' > gd_pass
-    bcftools query --include 'SVTYPE = "CPX" || SVTYPE = "CTX"' \
-      --format '%ID\n' sites_only.bcf > cpx_ctx_pass
 
-    cat gd_pass cpx_ctx_pass | sort -u > whitelist
+    sort -u gd_pass > whitelist
     cat af_fail bothsides_fail depth_only_fail exclude_regions_fail | sort -u > blacklist
     comm -13 whitelist blacklist > blacklist_clean
 
-    bcftools view --exclude 'ID = "@blacklist_clean"' --output-type u '~{vcf}' \
+    bcftools view --exclude 'ID = "@blacklist_clean"' --output-type u '~{bcf}' \
       | bcftools plugin setGT --output-type u - -- \
           --target-gt q --new-gt . \
           --include 'SVTYPE = "INS" & (ALGORITHM = "manta" | ALGORITHM = "melt") & (EVIDENCE = "RD,SR" | EVIDENCE = "SR") & HIGH_SR_BACKGROUND = 1 & GQ = 0' \
       | bcftools plugin setGT --output-type u - -- \
           --target-gt q --new-gt . \
           --include 'EVIDENCE = "wham" & GQ = 1' \
-      | bcftools plugin setGT --output-type z --output '~{output_vcf}' - -- \
+      | bcftools plugin setGT --output-type b --output '~{output_bcf}' - -- \
           --target-gt q --new-gt . \
           --include 'SVTYPE = "DEL" & (RD_CN = 2 | RD_CN = 3) & EVIDENCE = "PE"'
   >>>
 
   output {
-    File filtered_vcf = output_vcf
+    File filtered_bcf = output_bcf
   }
 }
 
-# Split a VCF of proband samples into one VCF per batch
-task SplitProbandVcfByBatch {
+# Split a BCF of proband samples into one BCF per batch
+task SplitProbandBcfByBatch {
   input {
-    File vcf = vcf
+    File bcf
+    Int batch_n
     File sample_manifest
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
 
-  Float input_size = size([vcf, sample_manifest], "GB")
+  Float input_size = size([bcf, sample_manifest], "GB")
+  Int default_cpus = if batch_n < 8 then batch_n else 8
   RuntimeAttr default_attr = object {
-    mem_gb: 4,
-    cpu_cores: 8,
+    mem_gb: 1,
+    cpu_cores: default_cpus,
     disk_gb: ceil(input_size * 3) + 16,
     boot_disk_gb: 8,
     preemptible_tries: 3,
@@ -731,8 +786,10 @@ task SplitProbandVcfByBatch {
   }
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
   Int cpus = select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+  Int mem = select_first([runtime_attr.mem_gb, cpus * 2])
+
   runtime {
-    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+    memory: mem + " GB"
     cpu: cpus
     disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
@@ -742,21 +799,21 @@ task SplitProbandVcfByBatch {
   }
 
   command <<<
-    set -euo pipefail
-    
-    bcftools query --list-samples '~{vcf}' > vcf_samples
-    mkdir batches vcfs
-    # We need to unconditionally create a VCF for each batch for transpose to work
-    cut -f 1 '~{sample_manifest}' | sort -u | xargs touch "vcfs/{}.vcf.gz"
+    set -euxo pipefail
+
+    bcftools query --list-samples '~{bcf}' > bcf_samples
+    mkdir batches bcfs
+    # We need to unconditionally create a BCF for each batch for transpose to work
+    cut -f 1 '~{sample_manifest}' | sort -u | xargs touch "bcfs/{}.bcf"
     awk -F'\t' 'NR==FNR{a[$2]=$1} NR>FNR && ($1 in a){print $1 > ("batches/" a[$1])}' \
-      '~{sample_manifest}' vcf_samples 
-  
+      '~{sample_manifest}' bcf_samples
+
     find batches -type f -exec basename '{}' \; \
-      | xargs -L 1 -P '~{cpus}' bcftools --output-type z --output "vcfs/{}.vcf.gz" \
+      | xargs -L 1 -P '~{cpus}' bcftools --output-type z --output "bcfs/{}.bcf" \
           --no-update --samples-files "batches/{}"
   >>>
 
   output {
-    Array[File] split_vcfs = glob("vcfs/*.vcf.gz")
+    Array[File] split_bcfs = glob("bcfs/*.bcf")
   }
 }
