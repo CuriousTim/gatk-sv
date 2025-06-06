@@ -559,9 +559,9 @@ task SplitBcfBySamples {
 
   command <<<
     bcftools view --output-type b --output '~{proband_output}' \
-      --threads ~{cpus} --no-update --samples-file '~{proband_ids}'
+      --threads ~{cpus} --no-update --samples-file '~{proband_ids}' '~{bcf}'
     bcftools view --output-type b --output '~{parent_output}' \
-      --threads ~{cpus} --no-update --samples-file '~{parent_ids}'
+      --threads ~{cpus} --no-update --samples-file '~{parent_ids}' '~{bcf}'
   >>>
 
   output {
