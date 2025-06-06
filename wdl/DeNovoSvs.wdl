@@ -78,7 +78,7 @@ workflow DeNovoSvs {
       clustered_wham_vcf = clustered_wham_vcf,
       clustered_scramble_vcf = clustered_scramble_vcf,
       clustered_depth_vcf = clustered_depth_vcf,
-      linux_docker = linux_docker,
+      denovo_docker = denovo_docker,
       runtime_attr_override = runtime_override_make_manifests
   }
 
@@ -215,7 +215,7 @@ task MakeManifests {
     Array[String] clustered_depth_vcf
     Array[String] batch_bincov_matrix
     Array[String] batch_bincov_matrix_index
-    String linux_docker
+    String denovo_docker
     RuntimeAttr? runtime_attr_override
   }
 
@@ -242,7 +242,7 @@ task MakeManifests {
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
     preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
     maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: linux_docker
+    docker: denovo_docker
   }
 
   command <<<
