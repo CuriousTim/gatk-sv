@@ -257,37 +257,37 @@ task MakeManifests {
     wham='~{if length(wham_vcfs) > 0 then write_lines(wham_vcfs) else ""}'
     scramble='~{if length(scramble_vcfs) > 0 then write_lines(scramble_vcfs) else ""}'
 
-    pesr_manifest='pesr_manifest.tsv'
-    : > "${pesr_manifest}"
+    : > pesr_manifest.tsv
     if [[ "${manta}" ]]; then
-        paste "${batch_names}" "${manta}" >> "${pesr_manifest}"
+        paste "${batch_names}" "${manta}" >> pesr_manifest.tsv
     fi
     if [[ "${melt}" ]]; then
-        paste "${batch_names}" "${melt}" >> "${pesr_manifest}"
+        paste "${batch_names}" "${melt}" >> pesr_manifest.tsv
     fi
     if [[ "${wham}" ]]; then
-        paste "${batch_names}" "${wham}" >> "${pesr_manifest}"
+        paste "${batch_names}" "${wham}" >> pesr_manifest.tsv
     fi
     if [[ "${scramble}" ]]; then
-        paste "${batch_names}" "${scramble}" >> "${pesr_manifest}"
+        paste "${batch_names}" "${scramble}" >> pesr_manifest.tsv
     fi
 
-    if [[ ! -s "${pesr_manifest}" ]]; then
-        printf 'at least one non-empty list of PESR evidence VCF lists should be provided\n' >&2
+    if [[ ! -s pesr_manifest.tsv ]]; then
+        printf 'at least one non-empty list of PESR evidence VCFs should be provided\n' >&2
         exit 1
     fi
 
     paste "${batch_names}" '~{write_lines(batch_sample_lists)}' \
       | awk -F'\t' '{while((getline line < $2) > 0) {print $1 "\t" line}}' > 'sample_manifest.tsv'
 
-    paste "${batch_names}" '~{write_lines(batch_bincov_matrix)}' '~{write_lines(batch_bincov_matrix_index)}' > 'bincov_manifest.tsv'
+    paste "${batch_names}" '~{write_lines(batch_bincov_matrix)}' \
+      '~{write_lines(batch_bincov_matrix_index)}' > 'bincov_manifest.tsv'
 
-duckdb <<EOF
+duckdb <<'EOF'
 COPY (
   SELECT json_group_object(batch, vcfs) AS pesr
   FROM (
     SELECT batch, list(vcf)
-    FROM read_csv('${pesr_manifest}',
+    FROM read_csv('pesr_manifest.tsv',
                   delim = '\t',
                   header = false,
                   names = ['batch', 'vcf'])
@@ -296,17 +296,17 @@ COPY (
 ) TO 'pesr_manifest.json' (FORMAT JSON);
 COPY (
   SELECT json_group_object(batch, vcf) AS depth
-  FROM read_csv('${depth_manifest}',
+  FROM read_csv('depth_manifest.tsv',
                 delim = '\t',
                 header = false,
-                names = ['batach', 'vcf'])
+                names = ['batch', 'vcf'])
 ) TO 'depth_manifest.json' (FORMAT JSON);
 COPY (
   SELECT json_group_object(batch, bincov) AS bincov
-  FROM read_csv('${bincov_manifest}',
+  FROM read_csv('bincov_manifest.tsv',
                 delim = '\t',
                 header = false,
-                names = ['batach', 'bincov'])
+                names = ['batch', 'bincov'])
 ) TO 'bincov_manifest.json' (FORMAT JSON);
 EOF
   >>>
