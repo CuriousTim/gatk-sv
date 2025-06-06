@@ -286,12 +286,12 @@ duckdb <<'EOF'
 COPY (
   SELECT json_group_object(batch, vcfs) AS pesr
   FROM (
-    SELECT batch, list(vcf)
+    SELECT batch, list(vcf) AS vcfs
     FROM read_csv('pesr_manifest.tsv',
                   delim = '\t',
                   header = false,
                   names = ['batch', 'vcf'])
-    GROUP BY batch)
+    GROUP BY batch
   )
 ) TO 'pesr_manifest.json' (FORMAT JSON);
 COPY (
