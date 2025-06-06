@@ -461,6 +461,10 @@ task SubsetSamples {
 
     awk -F'\t' '{print $2 > "probands.list"; print $3 > "parents.list"; print $4 > "parents.list"}' \
       subset.ped
+    sort -u probands.list > probands.list.tmp
+    mv probands.list.tmp probands.list
+    sort -u parents.list > parents.list.tmp
+    mv parents.list.tmp parents.list
   >>>
 
   output {
@@ -558,6 +562,8 @@ task SplitBcfBySamples {
   String parent_output = "parent-" + basename(bcf)
 
   command <<<
+    set -euxo pipefail
+
     bcftools view --output-type b --output '~{proband_output}' \
       --threads ~{cpus} --no-update --samples-file '~{proband_ids}' '~{bcf}'
     bcftools view --output-type b --output '~{parent_output}' \
