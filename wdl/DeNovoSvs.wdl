@@ -744,7 +744,7 @@ task FilterProbandSites {
       | bcftools query --exclude "${bothsides_filter}" --format '%ID\n' > bothsides_fail
     bcftools query \
       --include 'SVTYPE = "DUP" && ALGORITHMS = "depth" && SVLEN < ~{depth_only_size}' \
-      --format '%ID\n'
+      --format '%ID\n' \
       sites_only.bcf > depth_only_fail
 
     bcftools query --format '%CHROM\t%POS0\t%END\t%ID\n' sites_only.bcf > sites.bed
