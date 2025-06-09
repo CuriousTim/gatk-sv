@@ -881,16 +881,17 @@ task SplitProbandBcfByBatch {
   command <<<
     set -euxo pipefail
 
+    bcftools index '~{bcf}'
     bcftools query --list-samples '~{bcf}' > bcf_samples
     mkdir batches bcfs
     # We need to unconditionally create a BCF for each batch for transpose to work
-    cut -f 1 '~{sample_manifest}' | sort -u | xargs touch "bcfs/{}.bcf"
+    cut -f 1 '~{sample_manifest}' | sort -u | xargs -I '{}' touch 'bcfs/{}.bcf'
     awk -F'\t' 'NR==FNR{a[$2]=$1} NR>FNR && ($1 in a){print $1 > ("batches/" a[$1])}' \
       '~{sample_manifest}' bcf_samples
 
     find batches -type f -exec basename '{}' \; \
-      | xargs -L 1 -P '~{cpus}' bcftools view --output-type z --output "bcfs/{}.bcf" \
-          --no-update --samples-file "batches/{}"
+      | xargs -I '{}' -P '~{cpus}' bcftools view --output-type b --output 'bcfs/{}.bcf' \
+          --no-update --samples-file 'batches/{}' '~{bcf}'
   >>>
 
   output {
