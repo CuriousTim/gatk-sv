@@ -727,11 +727,13 @@ task FilterProbandSites {
       --format '%ID\n' \
       sites_only.bcf > af_fail
 
+    bcftools head sites_only.bcf | grep '^##' > headers.txt
+
     # Older GATK-SV VCFs have BOTHSIDES_SUPPORT in the FILTER field while
     # newer ones have it in the INFO field
-    if bcftools head sites_only.bcf | grep -qF '##INFO=<ID=BOTHSIDES_SUPPORT,'; then
+    if grep -qF '##INFO=<ID=BOTHSIDES_SUPPORT,' headers.txt; then
       bothsides_filter='INFO/BOTHSIDES_SUPPORT = 1'
-    elif bcftools head sites_only.bcf | grep -qF '##FILTER=<ID=BOTHSIDES_SUPPORT,'; then
+    elif grep -qF '##FILTER=<ID=BOTHSIDES_SUPPORT,' headers.txt; then
       bothsides_filter='FILTER ~ "BOTHSIDES_SUPPORT"'
     else
       printf 'BOTHSIDES_SUPPORT not found in BCF\n' >&2
@@ -813,11 +815,13 @@ task FilterProbandGenotypes {
   command <<<
     set -euxo pipefail
 
+    bcftools head '~{bcf}' | grep '^##' > headers.txt
+
     # Older GATK-SV VCFs have HIGH_SR_BACKGROUND in the FILTER field while
     # newer ones have it in the INFO field
-    if bcftools head '~{bcf}' | grep -qF '##INFO=<ID=HIGH_SR_BACKGROUND,'; then
+    if grep -qF '##INFO=<ID=HIGH_SR_BACKGROUND,' headers.txt; then
       high_sr_filter='INFO/HIGH_SR_BACKGROUND = 1'
-    elif bcftools head '~{bcf}' | grep -qF '##FILTER=<ID=HIGH_SR_BACKGROUND,'; then
+    elif grep -qF '##FILTER=<ID=HIGH_SR_BACKGROUND,' headers.txt; then
       high_sr_filter='FILTER ~ "HIGH_SR_BACKGROUND"'
     else
       printf 'HIGH_SR_BACKGROUND not found in BCF\n' >&2
