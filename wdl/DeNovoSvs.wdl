@@ -733,7 +733,7 @@ task FilterProbandSites {
       bothsides_filter='INFO/BOTHSIDES_SUPPORT = 1'
     elif bcftools head sites_only.bcf | grep -qF '##FILTER=<ID=BOTHSIDES_SUPPORT,'; then
       bothsides_filter='FILTER ~ "BOTHSIDES_SUPPORT"'
-    elif
+    else
       printf 'BOTHSIDES_SUPPORT not found in BCF\n' >&2
       exit 1
     fi
@@ -765,14 +765,6 @@ task FilterProbandSites {
     cat af_fail bothsides_fail depth_only_fail exclude_regions_fail | sort -u > blacklist
     comm -13 whitelist blacklist > blacklist_clean
 
-    if bcftools head sites_only.bcf | grep -qF '##INFO=<ID=HIGH_SR_BACKGROUND,'; then
-      high_sr_filter='INFO/HIGH_SR_BACKGROUND = 1'
-    elif bcftools head sites_only.bcf | grep -qF '##FILTER=<ID=HIGH_SR_BACKGROUND,'; then
-      high_sr_filter='FILTER ~ "HIGH_SR_BACKGROUND"'
-    else
-      printf 'HIGH_SR_BACKGROUND not found in BCF\n' >&2
-      exit 1
-    fi
     bcftools view --exclude 'ID = "@blacklist_clean"' --output-type u \
       --output '~{output_bcf}' '~{bcf}'
   >>>
