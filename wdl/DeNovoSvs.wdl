@@ -769,7 +769,7 @@ task FilterProbandSites {
       high_sr_filter='INFO/HIGH_SR_BACKGROUND = 1'
     elif bcftools head sites_only.bcf | grep -qF '##FILTER=<ID=HIGH_SR_BACKGROUND,'; then
       high_sr_filter='FILTER ~ "HIGH_SR_BACKGROUND"'
-    elif
+    else
       printf 'HIGH_SR_BACKGROUND not found in BCF\n' >&2
       exit 1
     fi
@@ -827,7 +827,7 @@ task FilterProbandGenotypes {
       high_sr_filter='INFO/HIGH_SR_BACKGROUND = 1'
     elif bcftools head '~{bcf}' | grep -qF '##FILTER=<ID=HIGH_SR_BACKGROUND,'; then
       high_sr_filter='FILTER ~ "HIGH_SR_BACKGROUND"'
-    elif
+    else
       printf 'HIGH_SR_BACKGROUND not found in BCF\n' >&2
       exit 1
     fi
