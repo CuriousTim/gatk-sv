@@ -63,7 +63,8 @@ workflow DeNovoSvs {
     RuntimeAttr? runtime_override_match_vcf_to_contig
     RuntimeAttr? runtime_override_filter_bcf_sites
     RuntimeAttr? runtime_override_split_bcf_by_samples
-    RuntimeAttr? runtime_override_filter_proband_bcf
+    RuntimeAttr? runtime_override_filter_proband_sites
+    RuntimeAttr? runtime_override_filter_proband_genotypes
     RuntimeAttr? runtime_override_split_proband_bcf_by_batch
   }
 
@@ -139,7 +140,7 @@ workflow DeNovoSvs {
         runtime_attr_override = runtime_override_split_bcf_by_samples
     }
 
-    call FilterProbandBcf {
+    call FilterProbandSites {
       input:
         bcf = SplitBcfBySamples.proband_bcf,
         max_cohort_af = max_cohort_af,
@@ -151,12 +152,19 @@ workflow DeNovoSvs {
         gd_regions = gd_regions,
         gd_overlap = gd_overlap,
         sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_filter_proband_bcf
+        runtime_attr_override = runtime_override_filter_proband_sites
+    }
+
+    call FilterProbandGenotypes {
+      input:
+        bcf = FilterProbandSites.filtered_bcf,
+        sv_base_mini_docker = sv_base_mini_docker,
+        runtime_attr_override = runtime_override_filter_proband_genotypes
     }
 
     call SplitProbandBcfByBatch {
       input:
-        bcf = FilterProbandBcf.filtered_bcf,
+        bcf = FilterProbandGenotypes.filtered_bcf,
         batch_n = length(batch_name_list),
         sample_manifest = MakeManifests.sample_manifest,
         sv_base_mini_docker = sv_base_mini_docker,
@@ -650,7 +658,7 @@ task MatchVcfToContig {
   }
 }
 
-# Filter a proband BCF for candidate de novo SVs.
+# Filter sites in a proband BCF for potential de novos
 # 1. Remove all sites that:
 #    a. have an cohort or gnomAD allele frequency greater than the input
 #       thresholds
@@ -661,12 +669,7 @@ task MatchVcfToContig {
 #    e. are not covered by genomic disorder regions by a minimum of
 #       `gd_overlap` fraction of the SV (any site meeting this criteria will be
 #       kept, even if it would otherwise excluded by the previous criteria)
-# 2. Set genotypes to missing where:
-#    a. SV type is INS and algorithm is Manta or MELT and evidence is SR-only
-#       and GQ = 0
-#    b. evidence is Wham-only and GQ = 1
-#    c. SV type is DEL and RD_CN is 2 or 3 and evidence is PE
-task FilterProbandBcf {
+task FilterProbandSites {
   input {
     File bcf
     Float max_cohort_af
@@ -723,11 +726,22 @@ task FilterProbandBcf {
       --include 'AF > ~{max_cohort_af} || gnomad_v4.1_sv_AF = "." || gnomad_v4.1_sv_AF > ~{max_gnomad_af}' \
       --format '%ID\n' \
       sites_only.bcf > af_fail
+
+    # Older GATK-SV VCFs have BOTHSIDES_SUPPORT in the FILTER field while
+    # newer ones have it in the INFO field
+    if bcftools head sites_only.bcf | grep -qF '##INFO=<ID=BOTHSIDES_SUPPORT,'; then
+      bothsides_filter='INFO/BOTHSIDES_SUPPORT = 1'
+    elif bcftools head sites_only.bcf | grep -qF '##FILTER=<ID=BOTHSIDES_SUPPORT,'; then
+      bothsides_filter='FILTER ~ "BOTHSIDES_SUPPORT"'
+    elif
+      printf 'BOTHSIDES_SUPPORT not found in BCF\n' >&2
+      exit 1
+    fi
     bcftools view \
-      --include '(SVTYPE = "DEL" || SVTYPE = "DUP") && (EVIDENCE = "RD,SR" && EVIDENCE = "SR") && SVLEN < ~{large_cnv_size}' \
+      --include '(SVTYPE = "DEL" || SVTYPE = "DUP") && (EVIDENCE ~ "^RD,SR$" || EVIDENCE = "SR") && SVLEN < ~{large_cnv_size}' \
       --output-type u \
       sites_only.bcf \
-      | bcftools query --exclude 'BOTHSIDES_SUPPORT = 1' --format '%ID\n' > bothsides_fail
+      | bcftools query --exclude "${bothsides_filter}" --format '%ID\n' > bothsides_fail
     bcftools query \
       --include 'SVTYPE = "DUP" && ALGORITHMS = "depth" && SVLEN < ~{depth_only_size}' \
       --format '%ID\n'
@@ -751,16 +765,82 @@ task FilterProbandBcf {
     cat af_fail bothsides_fail depth_only_fail exclude_regions_fail | sort -u > blacklist
     comm -13 whitelist blacklist > blacklist_clean
 
-    bcftools view --exclude 'ID = "@blacklist_clean"' --output-type u '~{bcf}' \
-      | bcftools plugin setGT --output-type u - -- \
-          --target-gt q --new-gt . \
-          --include 'SVTYPE = "INS" & (ALGORITHM = "manta" | ALGORITHM = "melt") & (EVIDENCE = "RD,SR" | EVIDENCE = "SR") & HIGH_SR_BACKGROUND = 1 & GQ = 0' \
-      | bcftools plugin setGT --output-type u - -- \
-          --target-gt q --new-gt . \
-          --include 'EVIDENCE = "wham" & GQ = 1' \
-      | bcftools plugin setGT --output-type b --output '~{output_bcf}' - -- \
-          --target-gt q --new-gt . \
-          --include 'SVTYPE = "DEL" & (RD_CN = 2 | RD_CN = 3) & EVIDENCE = "PE"'
+    if bcftools head sites_only.bcf | grep -qF '##INFO=<ID=HIGH_SR_BACKGROUND,'; then
+      high_sr_filter='INFO/HIGH_SR_BACKGROUND = 1'
+    elif bcftools head sites_only.bcf | grep -qF '##FILTER=<ID=HIGH_SR_BACKGROUND,'; then
+      high_sr_filter='FILTER ~ "HIGH_SR_BACKGROUND"'
+    elif
+      printf 'HIGH_SR_BACKGROUND not found in BCF\n' >&2
+      exit 1
+    fi
+    bcftools view --exclude 'ID = "@blacklist_clean"' --output-type u \
+      --output '~{output_bcf}' '~{bcf}'
+  >>>
+
+  output {
+    File filtered_bcf = output_bcf
+  }
+}
+
+# Filter genotypes in a proband BCF for potential de novos
+# 1. Set genotypes to missing where:
+#    a. SV type is INS and algorithm is Manta or MELT and evidence is SR-only
+#       and GQ = 0
+#    b. evidence is Wham-only and GQ = 1
+#    c. SV type is DEL and RD_CN is 2 or 3 and evidence is PE
+task FilterProbandGenotypes {
+  input {
+    File bcf
+    String sv_base_mini_docker 
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float bcf_size = size(bcf, "GB")
+  RuntimeAttr default_attr = object {
+    mem_gb: 4,
+    cpu_cores: 2,
+    disk_gb: ceil(bcf_size * 3) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
+  }
+
+  String output_bcf = basename(bcf)
+
+  command <<<
+    set -euxo pipefail
+
+    # Older GATK-SV VCFs have HIGH_SR_BACKGROUND in the FILTER field while
+    # newer ones have it in the INFO field
+    if bcftools head '~{bcf}' | grep -qF '##INFO=<ID=HIGH_SR_BACKGROUND,'; then
+      high_sr_filter='INFO/HIGH_SR_BACKGROUND = 1'
+    elif bcftools head '~{bcf}' | grep -qF '##FILTER=<ID=HIGH_SR_BACKGROUND,'; then
+      high_sr_filter='FILTER ~ "HIGH_SR_BACKGROUND"'
+    elif
+      printf 'HIGH_SR_BACKGROUND not found in BCF\n' >&2
+      exit 1
+    fi
+    ins_filter='SVTYPE = "INS" & (ALGORITHM = "manta" | ALGORITHM = "melt") & (EVIDENCE ~ "^RS,SR$" | EVIDENCE = "SR") & GQ = 0'
+    bcftools plugin setGT --output-type u '~{bcf}' -- \
+      --target-get q --new-gt . \
+      --include "${ins_filter} & ${hi_sr_filter}" \
+    | bcftools plugin setGT --output-type u - -- \
+        --target-gt q --new-gt . \
+        --include 'EVIDENCE = "wham" & GQ = 1' \
+    | bcftools plugin setGT --output-type b --output '~{output_bcf}' - -- \
+        --target-gt q --new-gt . \
+        --include 'SVTYPE = "DEL" & (RD_CN = 2 | RD_CN = 3) & EVIDENCE = "PE"'
   >>>
 
   output {
