@@ -866,7 +866,7 @@ task SplitProbandBcfByBatch {
   }
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
   Int cpus = select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-  Int mem = select_first([runtime_attr.mem_gb, cpus * 2])
+  Float mem = select_first([runtime_attr.mem_gb, cpus * 2])
 
   runtime {
     memory: mem + " GB"
