@@ -829,14 +829,14 @@ task FilterProbandGenotypes {
     fi
     ins_filter='SVTYPE = "INS" & (ALGORITHM = "manta" | ALGORITHM = "melt") & (EVIDENCE ~ "^RS,SR$" | EVIDENCE = "SR") & GQ = 0'
     bcftools plugin setGT --output-type u '~{bcf}' -- \
-      --target-get q --new-gt . \
-      --include "${ins_filter} & ${hi_sr_filter}" \
-    | bcftools plugin setGT --output-type u - -- \
-        --target-gt q --new-gt . \
-        --include 'EVIDENCE = "wham" & GQ = 1' \
-    | bcftools plugin setGT --output-type b --output '~{output_bcf}' - -- \
-        --target-gt q --new-gt . \
-        --include 'SVTYPE = "DEL" & (RD_CN = 2 | RD_CN = 3) & EVIDENCE = "PE"'
+      --target-gt q --new-gt . \
+      --include "${ins_filter} & ${high_sr_filter}" \
+      | bcftools plugin setGT --output-type u - -- \
+          --target-gt q --new-gt . \
+          --include 'EVIDENCE = "wham" & GQ = 1' \
+      | bcftools plugin setGT --output-type b --output '~{output_bcf}' - -- \
+          --target-gt q --new-gt . \
+          --include 'SVTYPE = "DEL" & (RD_CN = 2 | RD_CN = 3) & EVIDENCE = "PE"'
   >>>
 
   output {
