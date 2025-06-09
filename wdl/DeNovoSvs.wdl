@@ -827,7 +827,7 @@ task FilterProbandGenotypes {
       printf 'HIGH_SR_BACKGROUND not found in BCF\n' >&2
       exit 1
     fi
-    ins_filter='SVTYPE = "INS" & (ALGORITHM = "manta" | ALGORITHM = "melt") & (EVIDENCE ~ "^RS,SR$" | EVIDENCE = "SR") & GQ = 0'
+    ins_filter='SVTYPE = "INS" & (ALGORITHMS = "manta" | ALGORITHMS = "melt") & (EVIDENCE ~ "^RS,SR$" | EVIDENCE = "SR") & GQ = 0'
     bcftools plugin setGT --output-type u '~{bcf}' -- \
       --target-gt q --new-gt . \
       --include "${ins_filter} & ${high_sr_filter}" \
