@@ -889,7 +889,7 @@ task SplitProbandBcfByBatch {
       '~{sample_manifest}' bcf_samples
 
     find batches -type f -exec basename '{}' \; \
-      | xargs -L 1 -P '~{cpus}' bcftools --output-type z --output "bcfs/{}.bcf" \
+      | xargs -L 1 -P '~{cpus}' bcftools view --output-type z --output "bcfs/{}.bcf" \
           --no-update --samples-files "batches/{}"
   >>>
 
