@@ -69,7 +69,7 @@ workflow ManuallyReviewBalancedSVs {
       input:
         vcfs = SelectCTX.svtype_vcf,
         vcfs_idx = SelectCTX.svtype_vcf_index,
-        naive = true,
+        naive = false,
         outfile_prefix = "~{prefix}.CTX",
         sv_base_mini_docker = sv_base_mini_docker
     }
@@ -225,7 +225,7 @@ workflow ManuallyReviewBalancedSVs {
       input:
         vcfs = SelectINV.svtype_vcf,
         vcfs_idx = SelectINV.svtype_vcf_index,
-        naive = true,
+        naive = false,
         outfile_prefix = "~{prefix}.INV",
         sv_base_mini_docker = sv_base_mini_docker
     }
