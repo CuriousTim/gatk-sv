@@ -23,7 +23,7 @@ workflow DeNovoSV {
     Float max_cohort_af = 0.02
     Float max_gnomad_af = 0.01
     # Minimum fraction of SV overlapped by GD region
-    Float gd_overlap = 0.05
+    Float gd_overlap = 0.5
     File gd_regions
 
     # Either a single VCF or an array of VCFs with each one containing a single
@@ -393,15 +393,17 @@ task PreFilterVcf {
     }
 
     bcftools query --exclude 'SVTYPE = "BND" || SVTYPE = "CNV"' \
-      --format '%CHROM\t%POS0\t%END\t%ID\t%INFO/AF\t%INFO/gnomad_v4.1_sv_AF\n' \
+      --format '%CHROM\t%POS0\t%END\t%ID\t%INFO/SVTYPE\t%INFO/AF\t%INFO/gnomad_v4.1_sv_AF\n' \
       '~{vcf}' \
       | LC_ALL=C sort -k1,1 -k2,2n > sites.tsv
-    awk -F'\t' '$5 > af || ($6 != "." && $6 > gaf){print $4}' \
+    awk -F'\t' '$6 > af || ($7 != "." && $7 > gaf){print $4}' \
       af=~{max_cohort_af} gaf=~{max_gnomad_af} sites.tsv > af_fail.list
 
     cut -f 1-4 sites.tsv > sites.bed
+    awk -F'\t' '$5 ~ /DEL|DUP/{print $1,$2,$3,$4}' OFS='\t' sites.tsv > cnvs.bed
     
-    # Use coverage instead of intersect
+    # Use coverage instead of intersect to allow multiple regions overlapping
+    # an SV to count as one
     : > blacklist_fail.list
     bl_paths='~{if defined(blacklists) then write_lines(select_first([blacklists])) else ""}'
     if [[ -n "${bl_paths:-}" ]]; then
@@ -412,7 +414,7 @@ task PreFilterVcf {
         | awk -F'\t' '$8 >= ~{blacklist_overlap} {print $4}' > blacklist_fail.list
     fi
 
-    bedtools coverage -a sites.bed -b '~{gd_regions}' \
+    bedtools coverage -a cnvs.bed -b '~{gd_regions}' \
       | awk -F'\t' '$8 >= ~{gd_overlap} {print $4}' > gd_pass.list
 
     awk 'FILENAME==ARGV[1]{a[$1]} FILENAME!=ARGV[1] && !($1 in a){print}' \
