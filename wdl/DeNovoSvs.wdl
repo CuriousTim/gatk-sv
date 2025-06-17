@@ -785,7 +785,7 @@ task FilterProbandSites {
 task FilterProbandGenotypes {
   input {
     File bcf
-    String sv_base_mini_docker 
+    String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
 
@@ -897,4 +897,110 @@ task SplitProbandBcfByBatch {
   output {
     Array[File] split_bcfs = glob("bcfs/*.bcf")
   }
+}
+
+# Convert BCF to BED
+task BcfToBed {
+  input {
+    Array[File]+ bcfs
+    String output_prefix
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  Float input_size = size(bcfs, "GB")
+
+  RuntimeAttr default_attr = object {
+    mem_gb: 4,
+    cpu_cores: 2,
+    disk_gb: ceil(input_size * 2) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: select_first([runtime_attr_override, default_attr]) + " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
+  }
+
+  String output_name = output_prefix + ".bed.gz"
+
+  command <<<
+    set -euxo pipefail
+
+    # convert to BEDPE format
+    bcftools query --vcf-list '~{write_lines(bcfs)}' \
+      --include 'SVTYPE != "CPX" & SVTYPE != "CTX" & SVTYPE = "CNV" & SVTYPE = "BND" & GT ~ "1"' \
+      --format '%CHROM\t%POS0\t%INFO/END\t.\t-1\t-1\t%ID\t0\t.\t.\t%INFO/SVTYPE\t[%SAMPLE,]\n' \
+      | awk -F'\t' 'BEGIN{OFS="\t"} {sub(/,$/, "", $12); print}' \
+      | LC_ALL=C sort -k1,1 -2,2n \
+      | gzip -c > '~{output_name}'
+  >>>
+
+  output {
+    File bed = output_name
+  }
+}
+
+# Check proband raw evidence by batch
+task CheckProbandRawEvidence {
+  input {
+    # Should only contain samples in the same batch as all the other files.
+    File proband_bed
+    File batch_pesr_bed
+    File batch_depth_bed
+    File batch_bincov_matrix
+    File batch_bincov_matrix_index
+  }
+
+  Float input_size = size(proband_bcf, "GB")
+    + size(batch_pesr_bed, "GB")
+    + size(batch_depth_bed, "GB")
+    + size(batch_bincov_matrix, "GB")
+    + size(batch_bincov_matrix_index, "GB")
+
+  RuntimeAttr default_attr = object {
+    mem_gb: 2,
+    cpu_cores: 1,
+    disk_gb: ceil(input_size * 3) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores]) + " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
+  }
+
+  command <<<
+    set -euxo pipefail
+
+    # Check INS
+    gzip -cd '~{proband_bed}' \
+      | awk -F'\t' 'BEGIN{OFS="\t"} $11 == "INS"{$3 = $2 + 1; split($12, a, /,/); for(i in a){$12 = a[i]; print}}' \
+      | gzip -c > proband_ins.bed.gz
+    gzip -cd '~{batch_pesr_bed}' \
+      | awk -F'\t' 'BEGIN{OFS="\t"} $11 == "INS"{$3 = $2 + 1; split($12, a, /,/); for(i in a){$12 = a[i]; print}}'
+      | gzip -c > batch_ins.bed.gz
+    bedtools window -w 100 -a proband_ins.bed.gz -b batch_ins.bed.gz \
+      | awk -F'\t' 'BEGIN{OFS="\t"} $12 == $24{print $1,$2,$3,$7,$11,$12}' \
+      | gzip -c > matched_proband_ins.bed.gz
+    # Check DEL
+    # Check DUP
+    # Check INV
+  >>>
 }
