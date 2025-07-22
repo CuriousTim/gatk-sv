@@ -7,7 +7,6 @@ workflow MergeMEIAlts {
   input {
     Array[File] vcfs
     String sv_pipeline_docker
-    String sv_base_mini_docker
   }
 
   scatter (vcf in vcfs) {
