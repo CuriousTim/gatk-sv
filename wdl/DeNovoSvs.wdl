@@ -853,7 +853,7 @@ task SplitProbandBcfByBatch {
   Float input_size = size([bcf, sample_manifest], "GB")
   Int default_cpus = if batch_n < 8 then batch_n else 8
   RuntimeAttr default_attr = object {
-    mem_gb: 1,
+    mem_gb: default_cpus * 2,
     cpu_cores: default_cpus,
     disk_gb: ceil(input_size * 3) + 16,
     boot_disk_gb: 8,
