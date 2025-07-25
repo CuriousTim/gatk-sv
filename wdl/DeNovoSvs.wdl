@@ -917,7 +917,7 @@ task BcfToBed {
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
 
   runtime {
-    memory: select_first([runtime_attr_override, default_attr]) + " GB"
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
     cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
     disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
@@ -954,9 +954,11 @@ task CheckProbandRawEvidence {
     File batch_depth_bed
     File batch_bincov_matrix
     File batch_bincov_matrix_index
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
   }
 
-  Float input_size = size(proband_bcf, "GB")
+  Float input_size = size(proband_bed, "GB")
     + size(batch_pesr_bed, "GB")
     + size(batch_depth_bed, "GB")
     + size(batch_bincov_matrix, "GB")
@@ -973,7 +975,7 @@ task CheckProbandRawEvidence {
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
 
   runtime {
-    memory: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores]) + " GB"
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
     cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
     disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
