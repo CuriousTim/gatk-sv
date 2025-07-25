@@ -1,9 +1,5 @@
 version 1.0
 
-###########################
-# IMPORT TOOLS
-###########################
-
 import "Structs.wdl"
 
 ###########################
@@ -16,7 +12,7 @@ workflow DeNovoSvs {
     # One family ID per line to call de novo in subset of families
     File? family_ids
 
-    #' VCF filter parameters
+    # VCF filter parameters
     Float max_cohort_af = 0.02
     Float max_gnomad_af = 0.01
     # Minimum fraction of SV overlapped by GD region
