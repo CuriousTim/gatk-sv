@@ -20,6 +20,7 @@ workflow DeNovoSV {
     File? family_ids
 
     # VCF filter parameters
+    Boolean pass_only = false
     Float max_cohort_af = 0.02
     Float max_gnomad_af = 0.01
     # Minimum fraction of SV overlapped by GD region
@@ -143,6 +144,7 @@ workflow DeNovoSV {
     call PreFilterVcf {
       input:
         vcf = vcf,
+        pass_only = pass_only,
         max_cohort_af = max_cohort_af,
         max_gnomad_af = max_gnomad_af,
         blacklists = blacklists,
@@ -337,6 +339,7 @@ workflow DeNovoSV {
 #    b. Have an allele frequency or gnomAD allele frequency greater than the
 #       input thresholds
 #    c. Are covered by at least 50% by blacklist regions
+#    d. Are not PASS, if optioned
 #    d. Not covered by at least 50% by genomic disorder regions (any site
 #       meeting this criteria will be kept, even if it would be
 #       otherwise excluded by the previous criteria)
@@ -344,6 +347,7 @@ workflow DeNovoSV {
 task PreFilterVcf {
   input {
     File vcf
+    Boolean pass_only
     Float max_cohort_af
     Float max_gnomad_af
     Array[File]? blacklists
@@ -393,14 +397,19 @@ task PreFilterVcf {
     }
 
     bcftools query --exclude 'SVTYPE = "BND" || SVTYPE = "CNV"' \
-      --format '%CHROM\t%POS0\t%END\t%ID\t%INFO/SVTYPE\t%INFO/AF\t%INFO/gnomad_v4.1_sv_AF\n' \
+      --format '%CHROM\t%POS0\t%END\t%ID\t%FILTER\t%INFO/SVTYPE\t%INFO/AF\t%INFO/gnomad_v4.1_sv_AF\n' \
       '~{vcf}' \
       | LC_ALL=C sort -k1,1 -k2,2n > sites.tsv
-    awk -F'\t' '$6 > af || ($7 != "." && $7 > gaf){print $4}' \
+    awk -F'\t' '$7 > af || ($8 != "." && $8 > gaf){print $4}' \
       af=~{max_cohort_af} gaf=~{max_gnomad_af} sites.tsv > af_fail.list
+    if [[ ~{pass_only} == 'true' ]]; then
+      awk -F'\t' '$5 !~ /^PASS$/{print $4}' sites.tsv > filter_fail.list
+    else
+      : > filter_fail.list
+    fi
 
     cut -f 1-4 sites.tsv > sites.bed
-    awk -F'\t' '$5 ~ /DEL|DUP/{print $1,$2,$3,$4}' OFS='\t' sites.tsv > cnvs.bed
+    awk -F'\t' '$6 ~ /DEL|DUP/{print $1,$2,$3,$4}' OFS='\t' sites.tsv > cnvs.bed
     
     # Use coverage instead of intersect to allow multiple regions overlapping
     # an SV to count as one
@@ -418,7 +427,7 @@ task PreFilterVcf {
       | awk -F'\t' '$8 >= ~{gd_overlap} {print $4}' > gd_pass.list
 
     awk 'FILENAME==ARGV[1]{a[$1]} FILENAME!=ARGV[1] && !($1 in a){print}' \
-      gd_pass.list af_fail.list blacklist_fail.list > exclude.list
+      gd_pass.list filter_fail.list af_fail.list blacklist_fail.list > exclude.list
 
     # we do not want to force samples because in the context of this workflow, the
     # list of samples should only contain samples that are present in the last VCF
