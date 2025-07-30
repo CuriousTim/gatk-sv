@@ -12,6 +12,7 @@ import pandas as pd
 import pybedtools
 import collections
 import time
+import subprocess
 from subprocess import Popen, PIPE
 
 pd.options.mode.chained_assignment = None  # default='warn'
