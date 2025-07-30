@@ -152,9 +152,15 @@ def convert_to_bedtool(df, cols_to_keep=None, sort=True):
         bt_obj = pybedtools.BedTool(string_obj, from_string=True).sort()
     return bt_obj
 
+def get_gcs_token():
+    result = subprocess.run(['gcloud', 'auth', 'print-access-token'], capture_output=True, encoding = 'utf-8')
+    result.check_returncode()
+    return results.stdout.rstrip()
+
 
 def tabix_query(filename, chrom, start, end):
-    process = Popen(['tabix', '-h', filename, f'{chrom}:{start}-{end}'], stdout=PIPE)
+    token = get_gcs_token()
+    process = Popen(['/usr/local/bin/tabix', '-h', filename, f'{chrom}:{start}-{end}'], stdout=PIPE, env={'GCS_OAUTH_TOKEN': token})
     cov = []
     for line in process.stdout:
         cov.append(line.decode("utf-8").strip().split())
