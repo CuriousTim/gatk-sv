@@ -14,6 +14,7 @@ import collections
 import time
 import subprocess
 from subprocess import Popen, PIPE
+import os
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
@@ -161,7 +162,7 @@ def get_gcs_token():
 
 def tabix_query(filename, chrom, start, end):
     token = get_gcs_token()
-    process = Popen(['/usr/local/bin/tabix', '-h', filename, f'{chrom}:{start}-{end}'], stdout=PIPE, env={'GCS_OAUTH_TOKEN': token})
+    process = Popen(['tabix', '-h', filename, f'{chrom}:{start}-{end}'], stdout=PIPE, env={'GCS_OAUTH_TOKEN': token, 'PATH': os.environ['PATH']})
     cov = []
     for line in process.stdout:
         cov.append(line.decode("utf-8").strip().split())
