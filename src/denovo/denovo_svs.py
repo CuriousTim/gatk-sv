@@ -156,7 +156,7 @@ def convert_to_bedtool(df, cols_to_keep=None, sort=True):
 def get_gcs_token():
     result = subprocess.run(['gcloud', 'auth', 'print-access-token'], capture_output=True, encoding = 'utf-8')
     result.check_returncode()
-    return results.stdout.rstrip()
+    return result.stdout.rstrip()
 
 
 def tabix_query(filename, chrom, start, end):
