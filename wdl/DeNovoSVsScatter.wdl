@@ -136,10 +136,11 @@ task RunDeNovo {
 
   Float vcf_size = size(vcf, "GB")
   Float bed_size = size(bed_input, "GB")
+  Float raw_files_size = size([raw_proband, raw_parents, raw_depth_proband, raw_depth_parents], "GB")
 
   RuntimeAttr default_attr = object {
     mem_gb: 16,
-    disk_gb: ceil(16 + vcf_size + bed_size * 1.5),
+    disk_gb: ceil(16 + vcf_size + raw_files_size + bed_size * 3),
     cpu_cores: 1,
     preemptible_tries: 2,
     max_retries: 1,
