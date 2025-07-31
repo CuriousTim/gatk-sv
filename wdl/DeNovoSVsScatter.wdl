@@ -140,7 +140,7 @@ task RunDeNovo {
 
   RuntimeAttr default_attr = object {
     mem_gb: 16,
-    disk_gb: ceil(16 + vcf_size + raw_files_size + bed_size * 3),
+    disk_gb: ceil(32 + vcf_size * 5 + raw_files_size + bed_size),
     cpu_cores: 1,
     preemptible_tries: 2,
     max_retries: 1,
