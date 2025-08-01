@@ -374,8 +374,8 @@ def main():
     #########################
     # Exit out of bed file is empty
     if bed.size == 0:
-        bed.to_csv(path_or_buf = out_file, mode = 'a', index = False, sep = '\t', header = True)
-        bed.to_csv(path_or_buf = de_novo_out_file, mode = 'a', index = False, sep = '\t', header = True)
+        bed.to_csv(path_or_buf = out_file, mode = 'a', index = False, sep = '\t', header = True, compression = {'method': 'gzip', 'compresslevel': 6})
+        bed.to_csv(path_or_buf = de_novo_out_file, mode = 'a', index = False, sep = '\t', header = True, compression = {'method': 'gzip', 'compresslevel': 6})
         exit()
     # Get parents and children ids
     verbose_print('Getting parents/children/affected/unaffected IDs', verbose)
@@ -780,8 +780,8 @@ def main():
     de_novo = bed_final[(bed_final['is_de_novo']) | (bed_final['filter_flag'] == 'ins_filter')]
 
     # Write output
-    output.to_csv(path_or_buf=out_file, mode='a', index=False, sep='\t', header=True)
-    de_novo.to_csv(path_or_buf=de_novo_out_file, mode='a', index=False, sep='\t', header=True)
+    output.to_csv(path_or_buf=out_file, mode='a', index=False, sep='\t', header=True, compression = {'method': 'gzip', 'compresslevel': 6})
+    de_novo.to_csv(path_or_buf=de_novo_out_file, mode='a', index=False, sep='\t', header=True, compression = {'method': 'gzip', 'compresslevel': 6})
 
 
 if __name__ == '__main__':

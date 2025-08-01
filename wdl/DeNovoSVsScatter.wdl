@@ -163,8 +163,8 @@ task RunDeNovo {
         ~{bed_input} \
         ~{pedigree} \
         ~{basename}.noheader.vcf.gz \
-        ~{basename}.annotation.bed \
-        ~{basename}.denovo.bed \
+        ~{basename}.annotation.bed.gz \
+        ~{basename}.denovo.bed.gz \
         ~{raw_proband} \
         ~{raw_parents} \
         ~{raw_depth_proband} \
@@ -183,9 +183,6 @@ task RunDeNovo {
         --coverage-cutoff ~{coverage_cutoff} \
         --gq-min ~{gq_min} \
         --verbose
-
-    bgzip ~{basename}.denovo.bed
-    bgzip ~{basename}.annotation.bed
   >>>
 
   runtime {
@@ -217,7 +214,7 @@ task MergeBedFiles {
 
   RuntimeAttr default_attr = object {
     mem_gb: 3.75,
-    disk_gb: ceil(10 + (bed_files_size) * 2.0),
+    disk_gb: ceil(16 + (bed_files_size) * 2.0),
     cpu_cores: 1,
     preemptible_tries: 2,
     max_retries: 1,
@@ -228,9 +225,8 @@ task MergeBedFiles {
   command <<<
     set -exuo pipefail
 
-    zcat ~{bed_files[0]} | awk 'NR==1' > ~{chromosome}.denovo.merged.bed
-    zcat ~{sep=" " bed_files} | grep -v ^chrom >> ~{chromosome}.denovo.merged.bed
-    bgzip ~{chromosome}.denovo.merged.bed
+    zcat ~{sep=" " bed_files} \
+      | awk '/^chrom/{if(a){next}else{a=1}} 1' > ~{chromosome}.denovo.merged.bed.gz
   >>>
 
   runtime {
