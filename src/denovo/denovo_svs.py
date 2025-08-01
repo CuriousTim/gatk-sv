@@ -155,7 +155,7 @@ def convert_to_bedtool(df, cols_to_keep=None, sort=True):
     return bt_obj
 
 def get_gcs_token():
-    result = subprocess.run(['gcloud', 'auth', 'print-access-token'], capture_output=True, encoding = 'utf-8')
+    result = subprocess.run(['gcloud', 'auth', 'application-default', 'print-access-token'], capture_output=True, encoding = 'utf-8')
     result.check_returncode()
     return result.stdout.rstrip()
 

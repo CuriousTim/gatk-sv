@@ -156,8 +156,6 @@ task RunDeNovo {
     # denovo_svs.py expects the columns flipped.
     awk -F'\t' '{print $2"\t"$1}' '~{sample_batches}' > sample_batches_swapped.tsv
 
-    export GCS_OAUTH_TOKEN=`gcloud auth application-default print-access-token`
-
     bcftools view ~{vcf} | grep -v ^## | bgzip -c > ~{basename}.noheader.vcf.gz
     python /src/denovo/denovo_svs.py \
         ~{bed_input} \
