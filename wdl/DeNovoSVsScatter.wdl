@@ -224,7 +224,8 @@ task MergeBedFiles {
     set -exuo pipefail
 
     zcat ~{sep=" " bed_files} \
-      | awk '/^chrom/{if(a){next}else{a=1}} 1' > ~{chromosome}.denovo.merged.bed.gz
+      | awk '/^chrom/{if(a){next}else{a=1}} 1' \
+      | gzip -c > ~{chromosome}.denovo.merged.bed.gz
   >>>
 
   runtime {
