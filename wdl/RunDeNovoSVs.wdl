@@ -25,6 +25,9 @@ workflow DeNovoSV {
     Float max_gnomad_af = 0.01
     # Minimum fraction of SV overlapped by GD region
     Float gd_overlap = 0.5
+    # Maximum allele frequency of SV that is considered to be covered by GD
+    # regions
+    Float max_gd_af = 0.1
     File gd_regions
 
     # Either a single VCF or an array of VCFs with each one containing a single
@@ -147,6 +150,7 @@ workflow DeNovoSV {
         pass_only = pass_only,
         max_cohort_af = max_cohort_af,
         max_gnomad_af = max_gnomad_af,
+        max_gd_af = max_gd_af,
         blacklists = blacklists,
         blacklist_overlap = blacklist_overlap,
         gd_regions = gd_regions,
@@ -338,11 +342,10 @@ workflow DeNovoSV {
 #    a. Are BND or CNV
 #    b. Have an allele frequency or gnomAD allele frequency greater than the
 #       input thresholds
-#    c. Are covered by at least 50% by blacklist regions
+#    c. Are covered by blacklist regions by more than `blacklist_overlap`
 #    d. Are not PASS, if optioned
-#    d. Not covered by at least 50% by genomic disorder regions (any site
-#       meeting this criteria will be kept, even if it would be
-#       otherwise excluded by the previous criteria)
+#    e. Not covered by genomic disorder regions by more than `gd_overlap`
+#       and has an allele frequency less than `max_gd_af`
 # 2. Remove all samples from the VCF that are not in the input samples file
 task PreFilterVcf {
   input {
@@ -350,6 +353,7 @@ task PreFilterVcf {
     Boolean pass_only
     Float max_cohort_af
     Float max_gnomad_af
+    Float max_gd_af
     Array[File]? blacklists
     Float blacklist_overlap
     File gd_regions
@@ -396,38 +400,40 @@ task PreFilterVcf {
       fi
     }
 
+    : > exclude.tmp
     bcftools query --exclude 'SVTYPE = "BND" || SVTYPE = "CNV"' \
       --format '%CHROM\t%POS0\t%END\t%ID\t%FILTER\t%INFO/SVTYPE\t%INFO/AF\t%INFO/gnomad_v4.1_sv_AF\n' \
       '~{vcf}' \
       | LC_ALL=C sort -k1,1 -k2,2n > sites.tsv
+    # AF and gnomAD AF filter
     awk -F'\t' '$7 > af || ($8 != "." && $8 > gaf){print $4}' \
-      af=~{max_cohort_af} gaf=~{max_gnomad_af} sites.tsv > af_fail.list
+      af=~{max_cohort_af} gaf=~{max_gnomad_af} sites.tsv >> exclude.tmp
+    # VCF FILTER filter
     if [[ ~{pass_only} == 'true' ]]; then
-      awk -F'\t' '$5 !~ /^PASS$/{print $4}' sites.tsv > filter_fail.list
-    else
-      : > filter_fail.list
+      awk -F'\t' '$5 !~ /^PASS$/{print $4}' sites.tsv >> exclude.tmp
     fi
 
-    cut -f 1-4 sites.tsv > sites.bed
-    awk -F'\t' '$6 ~ /DEL|DUP/{print $1,$2,$3,$4}' OFS='\t' sites.tsv > cnvs.bed
-    
-    # Use coverage instead of intersect to allow multiple regions overlapping
-    # an SV to count as one
-    : > blacklist_fail.list
+    # Blacklist filter
     bl_paths='~{if defined(blacklists) then write_lines(select_first([blacklists])) else ""}'
     if [[ -n "${bl_paths:-}" ]]; then
       while read -r f; do cat2 "$f"; done < "${bl_paths}" \
         | LC_ALL=C sort -k1,1 -k2,2n > bl_merged.bed
 
+        # Use coverage instead of intersect to allow multiple regions overlapping
+        # an SV to count as one
+        cut -f 1-4 sites.tsv > sites.bed
         bedtools coverage -a sites.bed -b bl_merged.bed -sorted \
-        | awk -F'\t' '$8 >= ~{blacklist_overlap} {print $4}' > blacklist_fail.list
+          | awk -F'\t' '$8 >= ovp{print $4}' ovp=~{blacklist_overlap} >> exclude.tmp
     fi
 
+    # GD coverage
+    awk -F'\t' '$6 ~ /DEL|DUP/ && $7 <= af{print $1,$2,$3,$4}' \
+      OFS='\t' af=~{max_gd_af} sites.tsv > cnvs.bed
     bedtools coverage -a cnvs.bed -b '~{gd_regions}' \
-      | awk -F'\t' '$8 >= ~{gd_overlap} {print $4}' > gd_pass.list
+      | awk -F'\t' '$8 >= ovp{print $4}' ovp=~{gd_overlap} \
+      | LC_ALL=C sort -u > include.list
 
-    awk 'FILENAME==ARGV[1]{a[$1]} FILENAME!=ARGV[1] && !($1 in a){print}' \
-      gd_pass.list filter_fail.list af_fail.list blacklist_fail.list > exclude.list
+    LC_ALL=C comm -13 include.list <(LC_ALL=C sort -u exclude.tmp) > exclude.list
 
     # we do not want to force samples because in the context of this workflow, the
     # list of samples should only contain samples that are present in the last VCF
