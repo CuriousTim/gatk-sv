@@ -339,7 +339,7 @@ workflow DeNovoSV {
 
 # Filter the input VCF(s).
 # 1. Remove all sites that:
-#    a. Are BND or CNV
+#    a. Are BND, CNV, or CTX
 #    b. Have an allele frequency or gnomAD allele frequency greater than the
 #       input thresholds
 #    c. Are covered by blacklist regions by more than `blacklist_overlap`
@@ -401,7 +401,7 @@ task PreFilterVcf {
     }
 
     : > exclude.tmp
-    bcftools query --exclude 'SVTYPE = "BND" || SVTYPE = "CNV"' \
+    bcftools query --exclude 'SVTYPE = "BND" || SVTYPE = "CNV" || SVTYPE = "CTX"' \
       --format '%CHROM\t%POS0\t%END\t%ID\t%FILTER\t%INFO/SVTYPE\t%INFO/AF\t%INFO/gnomad_v4.1_sv_AF\n' \
       '~{vcf}' \
       | LC_ALL=C sort -k1,1 -k2,2n > sites.tsv
@@ -439,7 +439,7 @@ task PreFilterVcf {
     # list of samples should only contain samples that are present in the last VCF
     # in the array of input VCFs so if any other VCF does not have the exact same
     # set of samples, there is an error
-    bcftools view --exclude 'SVTYPE ="BND" || SVTYPE = "CNV" || ID = @exclude.list' \
+    bcftools view --exclude 'SVTYPE ="BND" || SVTYPE = "CNV" || SVTYPE = "CTX" || ID = @exclude.list' \
       --output-type u '~{vcf}' \
       | bcftools view --output-type z --output '~{output_vcf}' \
         --no-update --samples-file '~{samples}'
