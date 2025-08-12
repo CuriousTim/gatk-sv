@@ -346,6 +346,7 @@ workflow DeNovoSV {
 #    d. Are not PASS, if optioned
 #    e. Not covered by genomic disorder regions by more than `gd_overlap`
 #       and has an allele frequency less than `max_gd_af`
+#    f. Have HIGH_SR_BACKGROUND flag in INFO field
 # 2. Remove all samples from the VCF that are not in the input samples file
 task PreFilterVcf {
   input {
@@ -402,11 +403,11 @@ task PreFilterVcf {
 
     : > exclude.tmp
     bcftools query --exclude 'SVTYPE = "BND" || SVTYPE = "CNV" || SVTYPE = "CTX"' \
-      --format '%CHROM\t%POS0\t%END\t%ID\t%FILTER\t%INFO/SVTYPE\t%INFO/AF\t%INFO/gnomad_v4.1_sv_AF\n' \
+      --format '%CHROM\t%POS0\t%END\t%ID\t%FILTER\t%INFO/SVTYPE\t%INFO/AF\t%INFO/gnomad_v4.1_sv_AF\t%INFO/HIGH_SR_BACKGROUND\n' \
       '~{vcf}' \
       | LC_ALL=C sort -k1,1 -k2,2n > sites.tsv
-    # AF and gnomAD AF filter
-    awk -F'\t' '$7 > af || ($8 != "." && $8 > gaf){print $4}' \
+    # AF, gnomAD AF and HIGH_SR_BACKGROUND filter
+    awk -F'\t' '$7 > af || ($8 != "." && $8 > gaf) || ($9 == "1"){print $4}' \
       af=~{max_cohort_af} gaf=~{max_gnomad_af} sites.tsv >> exclude.tmp
     # VCF FILTER filter
     if [[ ~{pass_only} == 'true' ]]; then
