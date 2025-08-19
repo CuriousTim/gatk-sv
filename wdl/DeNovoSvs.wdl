@@ -60,7 +60,7 @@ workflow DeNovoSvs {
     RuntimeAttr? runtime_override_filter_bcf_sites
     RuntimeAttr? runtime_override_split_bcf_by_samples
     RuntimeAttr? runtime_override_filter_proband_sites
-    RuntimeAttr? runtime_override_filter_proband_genotypes
+    RuntimeAttr? runtime_override_concat_bcfs
     RuntimeAttr? runtime_override_split_proband_bcf_by_batch
   }
 
@@ -149,13 +149,6 @@ workflow DeNovoSvs {
         gd_overlap = gd_overlap,
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_filter_proband_sites
-    }
-
-    call FilterProbandGenotypes {
-      input:
-        bcf = FilterProbandSites.filtered_bcf,
-        sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_filter_proband_genotypes
     }
 
     call SplitProbandBcfByBatch {
@@ -783,74 +776,6 @@ task FilterProbandSites {
   }
 }
 
-# Filter genotypes in a proband BCF for potential de novos
-# 1. Set genotypes to missing where:
-#    a. SV type is INS and algorithm is Manta or MELT and evidence is SR-only
-#       and GQ = 0
-#    b. evidence is Wham-only and GQ = 1
-#    c. SV type is DEL and RD_CN is 2 or 3 and evidence is PE
-task FilterProbandGenotypes {
-  input {
-    File bcf
-    String sv_base_mini_docker
-    RuntimeAttr? runtime_attr_override
-  }
-
-  Float bcf_size = size(bcf, "GB")
-  RuntimeAttr default_attr = object {
-    mem_gb: 4,
-    cpu_cores: 2,
-    disk_gb: ceil(bcf_size * 3) + 16,
-    boot_disk_gb: 8,
-    preemptible_tries: 3,
-    max_retries: 1,
-  }
-  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-  runtime {
-    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
-    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: sv_base_mini_docker
-  }
-
-  String output_bcf = basename(bcf)
-
-  command <<<
-    set -euxo pipefail
-
-    bcftools head '~{bcf}' | grep '^##' > headers.txt
-
-    # Older GATK-SV VCFs have HIGH_SR_BACKGROUND in the FILTER field while
-    # newer ones have it in the INFO field
-    if grep -qF '##INFO=<ID=HIGH_SR_BACKGROUND,' headers.txt; then
-      high_sr_filter='INFO/HIGH_SR_BACKGROUND = 1'
-    elif grep -qF '##FILTER=<ID=HIGH_SR_BACKGROUND,' headers.txt; then
-      high_sr_filter='FILTER ~ "HIGH_SR_BACKGROUND"'
-    else
-      printf 'HIGH_SR_BACKGROUND not found in BCF\n' >&2
-      exit 1
-    fi
-    ins_filter='SVTYPE = "INS" & (ALGORITHMS = "manta" | ALGORITHMS = "melt") & (EVIDENCE ~ "^RS,SR$" | EVIDENCE = "SR") & GQ = 0'
-    bcftools plugin setGT --output-type u '~{bcf}' -- \
-      --target-gt q --new-gt . \
-      --include "${ins_filter} & ${high_sr_filter}" \
-      | bcftools plugin setGT --output-type u - -- \
-          --target-gt q --new-gt . \
-          --include 'EVIDENCE = "wham" & GQ = 1' \
-      | bcftools plugin setGT --output-type b --output '~{output_bcf}' - -- \
-          --target-gt q --new-gt . \
-          --include 'SVTYPE = "DEL" & (RD_CN = 2 | RD_CN = 3) & EVIDENCE = "PE"'
-  >>>
-
-  output {
-    File filtered_bcf = output_bcf
-  }
-}
-
 # Split a BCF of proband samples into one BCF per batch
 task SplitProbandBcfByBatch {
   input {
@@ -906,21 +831,21 @@ task SplitProbandBcfByBatch {
   }
 }
 
-# Convert BCF to BED
-task BcfToBed {
+# Concatenate VCFs/BCFs
+task ConcatBcfs {
   input {
     Array[File]+ bcfs
+    File? samples
     String output_prefix
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
 
   Float input_size = size(bcfs, "GB")
-
   RuntimeAttr default_attr = object {
-    mem_gb: 4,
-    cpu_cores: 2,
-    disk_gb: ceil(input_size * 2) + 16,
+    mem_gb: ceil(2 * input_size),
+    cpu_cores: 1,
+    disk_gb: ceil(input_size * 5) + 16,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1
@@ -928,8 +853,8 @@ task BcfToBed {
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
 
   runtime {
-    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    memory: mem + " GB"
+    cpu: cpus
     disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
     preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
@@ -937,22 +862,28 @@ task BcfToBed {
     docker: sv_base_mini_docker
   }
 
-  String output_name = output_prefix + ".bed.gz"
+  String output_name = "${output_prefix}.bcf"
 
   command <<<
     set -euxo pipefail
 
-    # convert to BEDPE format
-    bcftools query --vcf-list '~{write_lines(bcfs)}' \
-      --include 'SVTYPE != "CPX" & SVTYPE != "CTX" & SVTYPE = "CNV" & SVTYPE = "BND" & GT ~ "1"' \
-      --format '%CHROM\t%POS0\t%INFO/END\t.\t-1\t-1\t%ID\t0\t.\t.\t%INFO/SVTYPE\t[%SAMPLE,]\n' \
-      | awk -F'\t' 'BEGIN{OFS="\t"} {sub(/,$/, "", $12); print}' \
-      | LC_ALL=C sort -k1,1 -2,2n \
-      | gzip -c > '~{output_name}'
+    awk '{print $1"\tsubset-"$1}' '~{write_lines(bcfs)}' > manifest.tsv
+
+    while read -r src dest; do
+      bcftools view ~{if defined(samples) then "--samples-file '" + select_first([samples]) + "'" else ""} \
+        --output "${dest}" \
+        --output-type b \
+        "${src}"
+    done < manifest.tsv
+
+    bcftools concat --allow-overlaps --file-list <(cut -f 2 manifest.tsv) \
+      | bcftools sort --output '~{output_name}' --output-type b
+    bcftools index '~{output_name}'
   >>>
 
   output {
-    File bed = output_name
+    File merged_bcf = output_name
+    File merged_bcf_index = output_name
   }
 }
 
