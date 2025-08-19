@@ -286,6 +286,9 @@ task MakeManifests {
     paste "${batch_names}" '~{write_lines(batch_bincov_matrix)}' \
       '~{write_lines(batch_bincov_matrix_index)}' > 'bincov_manifest.tsv'
 
+    cut -f 1,2 'bincov_manifest.tsv' > 'bincov.tsv'
+    cut -f 1,3 'bincov_manifest.tsv' > 'bincov_index.tsv'
+
 duckdb <<'EOF'
 COPY (
   SELECT json_group_object(batch, vcfs) AS pesr
@@ -307,11 +310,18 @@ COPY (
 ) TO 'depth_manifest.json' (FORMAT JSON);
 COPY (
   SELECT json_group_object(batch, bincov) AS bincov
-  FROM read_csv('bincov_manifest.tsv',
+  FROM read_csv('bincov.tsv',
                 delim = '\t',
                 header = false,
                 names = ['batch', 'bincov'])
 ) TO 'bincov_manifest.json' (FORMAT JSON);
+COPY (
+  SELECT json_group_object(batch, bincov) AS bincov_index
+  FROM read_csv('bincov_index.tsv',
+                delim = '\t',
+                header = false,
+                names = ['batch', 'bincov_index'])
+) TO 'bincov_index_manifest.json' (FORMAT JSON);
 EOF
   >>>
 
@@ -327,6 +337,7 @@ EOF
     Map[String, String] depth_map = read_json("depth_manifest.json")["depth"]
     Map[String, Array[String]] pesr_map = read_json("pesr_manifest.json")["pesr"]
     Map[String, String] bincov_map = read_json("bincov_manifest.json")["bincov"]
+    Map[String, String] bincov_index_map = read_json("bincov_index_manifest.json")["bincov_index"]
   }
 }
 
