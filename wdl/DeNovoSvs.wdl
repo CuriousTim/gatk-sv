@@ -721,9 +721,8 @@ task FilterProbandSites {
     }
 
     bcftools view --drop-genotypes --output-type b --output sites_only.bcf '~{bcf}'
-    # TODO should missing gnomAD AF mean filter out?
     bcftools query \
-      --include 'AF > ~{max_cohort_af} || gnomad_v4.1_sv_AF = "." || gnomad_v4.1_sv_AF > ~{max_gnomad_af}' \
+      --include 'AF > ~{max_cohort_af} || (gnomad_v4.1_sv_AF != "." && gnomad_v4.1_sv_AF > ~{max_gnomad_af})' \
       --format '%ID\n' \
       sites_only.bcf > af_fail
 
