@@ -1,6 +1,7 @@
 version 1.0
 
 import "Structs.wdl"
+import "SVConcordance.wdl"
 
 ###########################
 # MAIN WORKFLOW DEFINITION
@@ -36,6 +37,9 @@ workflow DeNovoSvs {
       "chr7", "chr8", "chr9", "chr10", "chr11", "chr12", "chr13", "chr14", "chr15",
       "chr16", "chr17", "chr18", "chr19", "chr20", "chr21", "chr22", "chrX"]
 
+    # SVConcordance
+    File reference_dict
+
     # Raw data
     Array[String] batch_name_list            # batch IDs
     Array[File] batch_sample_lists           # samples in each batch (filtered set)
@@ -51,6 +55,7 @@ workflow DeNovoSvs {
     String linux_docker
     String sv_base_mini_docker
     String sv_pipeline_docker
+    String gatk_docker
     String denovo_docker
 
     RuntimeAttr? runtime_override_make_manifests
@@ -218,15 +223,6 @@ workflow DeNovoSvs {
     Array[File] by_proband_bcfs = proband_batch_grouped_bcfs[i]
     String by_proband_batch_id = basename(proband_batch_proband_ids[i][0])
     if (size(by_proband_bcfs) > 0) {
-      call ConcatBcfs as concat_proband_batch_bcfs {
-        input:
-          bcfs = by_proband_bcfs,
-          samples = proband_batch_proband_ids[i][0],
-          output_prefix = by_proband_batch_id,
-          sv_base_mini_docker = sv_base_mini_docker,
-          runtime_attr_override = runtime_override_concat_bcfs
-      }
-
       call ConcatBcfs as concat_proband_batch_raw {
         input:
           bcfs = MakeManifests.pesr_map[by_proband_batch_id],
@@ -235,6 +231,19 @@ workflow DeNovoSvs {
           sv_base_mini_docker = sv_base_mini_docker,
           runtime_attr_override = runtime_override_concat_bcfs
       }
+
+      scatter (j in range(length(proband_batch_grouped_bcfs[i]))) {
+        call SVConcordance.SVConcordanceTask as proband_v_proband {
+          input:
+            eval_vcf = proband_batch_grouped_bcfs[i][j],
+            truth_vcf = concat_proband_batch_raw.merged_bcf,
+            output_prefix = "proband_v_proband-" + kept_contigs[j],
+            contig = kept_contigs[j],
+            reference_dict = reference_dict,
+            gatk_docker = gatk_docker,
+            runtime_attr_override = object {mem_gb: 4}
+        }
+      }
     }
   }
 
@@ -242,15 +251,6 @@ workflow DeNovoSvs {
     Array[File] by_father_bcfs = father_batch_grouped_bcfs[i]
     String by_father_batch_id = basename(father_batch_proband_ids[i][0])
     if (size(by_father_bcfs) > 0) {
-      call ConcatBcfs as concat_father_batch_bcfs {
-        input:
-          bcfs = by_father_bcfs,
-          samples = father_batch_proband_ids[i][0],
-          output_prefix = by_father_batch_id,
-          sv_base_mini_docker = sv_base_mini_docker,
-          runtime_attr_override = runtime_override_concat_bcfs
-      }
-
       call ConcatBcfs as concat_father_batch_raw {
         input:
           bcfs = MakeManifests.pesr_map[by_father_batch_id],
@@ -259,6 +259,19 @@ workflow DeNovoSvs {
           sv_base_mini_docker = sv_base_mini_docker,
           runtime_attr_override = runtime_override_concat_bcfs
       }
+
+      scatter (j in range(length(father_batch_grouped_bcfs[i]))) {
+        call SVConcordance.SVConcordanceTask as proband_v_father {
+          input:
+            eval_vcf = father_batch_grouped_bcfs[i][j],
+            truth_vcf = concat_father_batch_raw.merged_bcf,
+            output_prefix = "proband_v_father-" + kept_contigs[j],
+            contig = kept_contigs[j],
+            reference_dict = reference_dict,
+            gatk_docker = gatk_docker,
+            runtime_attr_override = object {mem_gb: 4}
+        }
+      }
     }
   }
 
@@ -266,15 +279,6 @@ workflow DeNovoSvs {
     Array[File] by_mother_bcfs = mother_batch_grouped_bcfs[i]
     String by_mother_batch_id = basename(mother_batch_proband_ids[i][0])
     if (size(by_mother_bcfs) > 0) {
-      call ConcatBcfs as concat_mother_batch_bcfs {
-        input:
-          bcfs = by_mother_bcfs,
-          samples = mother_batch_proband_ids[i][0],
-          output_prefix = by_mother_batch_id,
-          sv_base_mini_docker = sv_base_mini_docker,
-          runtime_attr_override = runtime_override_concat_bcfs
-      }
-
       call ConcatBcfs as concat_mother_batch_raw {
         input:
           bcfs = MakeManifests.pesr_map[by_mother_batch_id],
@@ -283,11 +287,26 @@ workflow DeNovoSvs {
           sv_base_mini_docker = sv_base_mini_docker,
           runtime_attr_override = runtime_override_concat_bcfs
       }
+
+      scatter (j in range(length(mother_batch_grouped_bcfs[i]))) {
+        call SVConcordance.SVConcordanceTask as proband_v_mother {
+          input:
+            eval_vcf = mother_batch_grouped_bcfs[i][j],
+            truth_vcf = concat_mother_batch_raw.merged_bcf,
+            output_prefix = "proband_v_mother-" + kept_contigs[j],
+            contig = kept_contigs[j],
+            reference_dict = reference_dict,
+            gatk_docker = gatk_docker,
+            runtime_attr_override = object {mem_gb: 4}
+        }
+      }
     }
   }
 
   output {
-    Array[Array[File]] probands = proband_batch_grouped_bcfs
+    Array[Array[File]] proband_concordance = select_all(proband_v_proband.out)
+    Array[Array[File]] father_concordance = select_all(proband_v_father.out)
+    Array[Array[File]] mother_concordance = select_all(proband_v_mother.out)
   }
 }
 
