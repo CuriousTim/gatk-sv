@@ -57,11 +57,11 @@ workflow DeNovoSvs {
     RuntimeAttr? runtime_override_subset_vcf_by_contig
     RuntimeAttr? runtime_override_subset_samples
     RuntimeAttr? runtime_override_match_vcf_to_contig
-    RuntimeAttr? runtime_override_filter_bcf_sites
-    RuntimeAttr? runtime_override_split_bcf_by_samples
+    RuntimeAttr? runtime_override_remove_uncalled_svtypes
+    RuntimeAttr? runtime_override_subset_bcf_by_samples
     RuntimeAttr? runtime_override_filter_proband_sites
     RuntimeAttr? runtime_override_concat_bcfs
-    RuntimeAttr? runtime_override_split_proband_bcf_by_batch
+    RuntimeAttr? runtime_override_group_probands_by_batch
   }
 
   call MakeManifests {
@@ -119,26 +119,26 @@ workflow DeNovoSvs {
 
   Array[File] matched_vcfs = select_all(MatchVcfToContig.matched_vcf)
   Array[String] kept_contigs = select_all(MatchVcfToContig.matched_contig)
-  scatter (vcf in matched_vcfs) {
-    call FilterVcfSites {
+  scatter (i in range(length(matched_vcfs))) {
+    call SubsetBcfBySamples as make_proband_bcf {
       input:
-        vcf = vcf,
+        bcf = matched_vcfs[i],
+        samples = SubsetSamples.probands,
+        output_prefix = "probands-" + kept_contigs[i],
         sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_filter_bcf_sites
+        runtime_attr_override = runtime_override_subset_bcf_by_samples
     }
 
-    call SplitBcfBySamples {
+    call RemoveUncalledSvtypes {
       input:
-        bcf = FilterVcfSites.filtered_bcf,
-        proband_ids = SubsetSamples.probands,
-        parent_ids = SubsetSamples.parents,
+        bcf = make_proband_bcf.subset_bcf,
         sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_split_bcf_by_samples
+        runtime_attr_override = runtime_override_remove_uncalled_svtypes
     }
 
     call FilterProbandSites {
       input:
-        bcf = SplitBcfBySamples.proband_bcf,
+        bcf = RemoveUncalledSvtypes.filtered_bcf,
         max_cohort_af = max_cohort_af,
         max_gnomad_af = max_gnomad_af,
         large_cnv_size = large_cnv_size,
@@ -151,13 +151,47 @@ workflow DeNovoSvs {
         runtime_attr_override = runtime_override_filter_proband_sites
     }
 
-    call SplitProbandBcfByBatch {
+    call GroupProbandsByBatch {
       input:
-        bcf = FilterProbandGenotypes.filtered_bcf,
-        batch_n = length(batch_name_list),
+        bcf = FilterProbandSites.filtered_bcf,
+        batches = SubsetSamples.batch_subset,
+        pedigree = SubsetSamples.ped_subset,
         sample_manifest = MakeManifests.sample_manifest,
         sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_split_proband_bcf_by_batch
+        runtime_attr_override = runtime_override_group_probands_by_batch
+    }
+
+    scatter (probands in GroupProbandsByBatch.by_proband) {
+      call SubsetBcfBySamples as group_bcf_by_proband_batch {
+        input:
+          bcf = FilterProbandSites.filtered_bcf,
+          samples = probands,
+          output_prefix = basename(probands),
+          sv_base_mini_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_subset_bcf_by_samples
+      }
+    }
+
+    scatter (probands in GroupProbandsByBatch.by_father) {
+      call SubsetBcfBySamples as group_bcf_by_father_batch {
+        input:
+          bcf = FilterProbandSites.filtered_bcf,
+          samples = probands,
+          output_prefix = basename(probands),
+          sv_base_mini_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_subset_bcf_by_samples
+      }
+    }
+
+    scatter (probands in GroupProbandsByBatch.by_mother) {
+      call SubsetBcfBySamples as group_bcf_by_mother_batch {
+        input:
+          bcf = FilterProbandSites.filtered_bcf,
+          samples = probands,
+          output_prefix = basename(probands),
+          sv_base_mini_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_subset_bcf_by_samples
+      }
     }
   }
 
@@ -172,23 +206,88 @@ workflow DeNovoSvs {
   #   [ contig0-batch1, contig1-batch1, contig2-batch1, ...],   <--+
   #   ...
   # ]
-  Array[Array[File]] batched_proband_bcfs = transpose(SplitProbandBcfByBatch.split_bcfs)
-  # scatter (batch_vcfs in batched_proband_vcfs) {
-  #   if (size(batch_vcfs) > 0) {
-  #     String batch_id = basename(batch_vcfs[0], ".vcf.gz")
-  #     call CheckProbandRawEvidence {
-  #       input:
-  #         proband_vcfs = batch_vcfs,
-  #         clustered_pesr_vcfs = MakeManifests.pesr_map[batch_id],
-  #         clustered_depth_vcf = MakeManifests.depth_map[batch_id],
-  #         sv_pipeline_docker = sv_pipeline_docker,
-  #         runtime_attr_override = runtime_override_check_proband_raw_evidence
-  #     }
-  #   }
-  # }
+  Array[Array[File]] proband_batch_grouped_bcfs = transpose(group_bcf_by_proband_batch.subset_bcf)
+  Array[Array[File]] father_batch_grouped_bcfs = transpose(group_bcf_by_father_batch.subset_bcf)
+  Array[Array[File]] mother_batch_grouped_bcfs = transpose(group_bcf_by_mother_batch.subset_bcf)
+  Array[Array[File]] proband_batch_proband_ids = transpose(GroupProbandsByBatch.by_proband)
+  Array[Array[File]] father_batch_father_ids = transpose(GroupProbandsByBatch.fathers)
+  Array[Array[File]] father_batch_proband_ids = transpose(GroupProbandsByBatch.by_father)
+  Array[Array[File]] mother_batch_mother_ids = transpose(GroupProbandsByBatch.mothers)
+  Array[Array[File]] mother_batch_proband_ids = transpose(GroupProbandsByBatch.by_mother)
+  scatter (i in range(length(proband_batch_grouped_bcfs))) {
+    Array[File] by_proband_bcfs = proband_batch_grouped_bcfs[i]
+    String by_proband_batch_id = basename(proband_batch_proband_ids[i][0])
+    if (size(by_proband_bcfs) > 0) {
+      call ConcatBcfs as concat_proband_batch_bcfs {
+        input:
+          bcfs = by_proband_bcfs,
+          samples = proband_batch_proband_ids[i][0],
+          output_prefix = by_proband_batch_id,
+          sv_base_mini_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_concat_bcfs
+      }
+
+      call ConcatBcfs as concat_proband_batch_raw {
+        input:
+          bcfs = MakeManifests.pesr_map[by_proband_batch_id],
+          samples = proband_batch_proband_ids[i][0],
+          output_prefix = by_proband_batch_id,
+          sv_base_mini_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_concat_bcfs
+      }
+    }
+  }
+
+  scatter (i in range(length(father_batch_grouped_bcfs))) {
+    Array[File] by_father_bcfs = father_batch_grouped_bcfs[i]
+    String by_father_batch_id = basename(father_batch_proband_ids[i][0])
+    if (size(by_father_bcfs) > 0) {
+      call ConcatBcfs as concat_father_batch_bcfs {
+        input:
+          bcfs = by_father_bcfs,
+          samples = father_batch_proband_ids[i][0],
+          output_prefix = by_father_batch_id,
+          sv_base_mini_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_concat_bcfs
+      }
+
+      call ConcatBcfs as concat_father_batch_raw {
+        input:
+          bcfs = MakeManifests.pesr_map[by_father_batch_id],
+          samples = father_batch_father_ids[i][0],
+          output_prefix = by_father_batch_id,
+          sv_base_mini_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_concat_bcfs
+      }
+    }
+  }
+
+  scatter (i in range(length(mother_batch_grouped_bcfs))) {
+    Array[File] by_mother_bcfs = mother_batch_grouped_bcfs[i]
+    String by_mother_batch_id = basename(mother_batch_proband_ids[i][0])
+    if (size(by_mother_bcfs) > 0) {
+      call ConcatBcfs as concat_mother_batch_bcfs {
+        input:
+          bcfs = by_mother_bcfs,
+          samples = mother_batch_proband_ids[i][0],
+          output_prefix = by_mother_batch_id,
+          sv_base_mini_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_concat_bcfs
+      }
+
+      call ConcatBcfs as concat_mother_batch_raw {
+        input:
+          bcfs = MakeManifests.pesr_map[by_mother_batch_id],
+          samples = mother_batch_proband_ids[i][0],
+          output_prefix = by_mother_batch_id,
+          sv_base_mini_docker = sv_base_mini_docker,
+          runtime_attr_override = runtime_override_concat_bcfs
+      }
+    }
+  }
 
   output {
-    Array[Array[File]] probands = batched_proband_bcfs
+    Array[Array[File]] probands = proband_batch_grouped_bcfs
   }
 }
 
@@ -196,7 +295,7 @@ workflow DeNovoSvs {
 # TASK DEFINITIONS
 ###########################
 
-# Convert the input arrays into files that are needed by other tasks in the workflow.
+# Create manifests of the paths to the raw evidence files.
 task MakeManifests {
   input {
     Array[String] batch_name_list
@@ -467,28 +566,23 @@ task SubsetSamples {
       exit 1
     fi
 
-    awk -F'\t' '{print $2 > "probands.list"; print $3 > "parents.list"; print $4 > "parents.list"}' \
-      subset.ped
+    awk -F'\t' '{print $2}' subset.ped > probands.list
     sort -u probands.list > probands.list.tmp
     mv probands.list.tmp probands.list
-    sort -u parents.list > parents.list.tmp
-    mv parents.list.tmp parents.list
   >>>
 
   output {
     File ped_subset = "subset.ped"
     File probands = "probands.list"
-    File parents = "parents.list"
-    File sample_subset = "sample_subset.list"
     File batch_subset = "batch_subset.list"
   }
 }
 
 # Remove BND and mCNV sites and create a BCF file without any CPX or CTX sites
 # and a VCF with only the CPX and CTX sites
-task FilterVcfSites {
+task RemoveUncalledSvtypes {
   input {
-    File vcf
+    File bcf
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
@@ -496,7 +590,7 @@ task FilterVcfSites {
   RuntimeAttr default_attr = object {
     mem_gb: 4,
     cpu_cores: 4,
-    disk_gb: ceil(size(vcf, "GB") * 3)  + 16,
+    disk_gb: ceil(size(bcf, "GB") * 3)  + 16,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
@@ -514,17 +608,17 @@ task FilterVcfSites {
     docker: sv_base_mini_docker
   }
 
-  String output_name = basename(vcf, ".vcf.gz") + ".bcf"
-  String cpx_output_name = "cpx_ctx-" + basename(vcf)
+  String output_name = "sites_filtered-" + basename(bcf)
+  String cpx_output_name = "cpx_ctx-" + basename(bcf, ".bcf") + ".vcf.gz"
 
   command <<<
     set -euxo pipefail
-    bcftools view --exclude 'SVTYPE = "BND" || SVTYPE = "CNV"' \
-      --threads ~{cpus} --output-type b --output tmp.bcf '~{vcf}'
+    bcftools view --exclude 'INFO/SVTYPE = "BND" || INFO/SVTYPE = "CNV"' \
+      --threads ~{cpus} --output-type b --output tmp.bcf '~{bcf}'
 
-    bcftools view --exclude 'SVTYPE = "CPX" || SVTYPE = "CTX"' \
+    bcftools view --exclude 'INFO/SVTYPE = "CPX" || INFO/SVTYPE = "CTX"' \
       --threads ~{cpus} --output-type b --output '~{output_name}' tmp.bcf
-    bcftools view --include 'SVTYPE = "CPX" || SVTYPE = "CTX"' \
+    bcftools view --include 'INFO/SVTYPE = "CPX" || INFO/SVTYPE = "CTX"' \
       --threads ~{cpus} --output-type z --output '~{cpx_output_name}' tmp.bcf
   >>>
 
@@ -534,31 +628,32 @@ task FilterVcfSites {
   }
 }
 
-task SplitBcfBySamples {
+# Subset a VCF/BCF to a set of samples, excluding sites that do not have any ALT genotypes after
+# subsetting. If the set of samples is empty, the task will output an empty file.
+task SubsetBcfBySamples {
   input {
     File bcf
-    File proband_ids
-    File parent_ids
+    File samples
+    String output_prefix
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
 
   Float bcf_size = size(bcf, "GB")
-  Float other_size = size([proband_ids, parent_ids], "GB")
+  Float other_size = size(samples, "GB")
   RuntimeAttr default_attr = object {
     mem_gb: 4,
-    cpu_cores: 4,
-    disk_gb: ceil(bcf_size * 4 + other_size) + 16,
+    cpu_cores: 1,
+    disk_gb: ceil(bcf_size * 2 + other_size) + 16,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
   }
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-  Int cpus = select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
 
   runtime {
     memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GB"
-    cpu: cpus
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
     disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
     preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
@@ -566,21 +661,21 @@ task SplitBcfBySamples {
     docker: sv_base_mini_docker
   }
 
-  String proband_output = "proband-" + basename(bcf)
-  String parent_output = "parent-" + basename(bcf)
+  String output_name = output_prefix + ".bcf"
 
   command <<<
     set -euxo pipefail
 
-    bcftools view --output-type b --output '~{proband_output}' \
-      --threads ~{cpus} --no-update --samples-file '~{proband_ids}' '~{bcf}'
-    bcftools view --output-type b --output '~{parent_output}' \
-      --threads ~{cpus} --no-update --samples-file '~{parent_ids}' '~{bcf}'
+    if [[ -s '~{samples}' ]]; then
+      bcftools view --output-type u --no-update --samples-file '~{samples}' '~{bcf}' \
+        | bcftools view --include 'COUNT(GT="alt") > 0' --output-type b --output '~{output_name}'
+    else
+      touch '~{output_name}'
+    fi
   >>>
 
   output {
-    File proband_bcf = proband_output
-    File parental_bcf = parent_output
+    File subset_bcf = output_name
   }
 }
 
@@ -775,33 +870,31 @@ task FilterProbandSites {
   }
 }
 
-# Split a BCF of proband samples into one BCF per batch
-task SplitProbandBcfByBatch {
+# Group sample IDs by different batches
+task GroupProbandsByBatch {
   input {
     File bcf
-    Int batch_n
+    File batches
+    File pedigree
     File sample_manifest
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
 
-  Float input_size = size([bcf, sample_manifest], "GB")
-  Int default_cpus = if batch_n < 8 then batch_n else 8
+  Float input_size = size([bcf, batches, pedigree, sample_manifest], "GB")
   RuntimeAttr default_attr = object {
-    mem_gb: default_cpus * 2,
-    cpu_cores: default_cpus,
-    disk_gb: ceil(input_size * 3) + 16,
+    mem_gb: 2,
+    cpu_cores: 1,
+    disk_gb: ceil(input_size * 2) + 16,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1
   }
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-  Int cpus = select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-  Float mem = select_first([runtime_attr.mem_gb, cpus * 2])
 
   runtime {
-    memory: mem + " GB"
-    cpu: cpus
+    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb])+ " GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
     disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
     preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
@@ -814,19 +907,29 @@ task SplitProbandBcfByBatch {
 
     bcftools index '~{bcf}'
     bcftools query --list-samples '~{bcf}' > bcf_samples
-    mkdir batches bcfs
-    # We need to unconditionally create a BCF for each batch for transpose to work
-    cut -f 1 '~{sample_manifest}' | sort -u | xargs -I '{}' touch 'bcfs/{}.bcf'
-    awk -F'\t' 'NR==FNR{a[$2]=$1} NR>FNR && ($1 in a){print $1 > ("batches/" a[$1])}' \
-      '~{sample_manifest}' bcf_samples
+    mkdir by_proband by_father fathers by_mother mothers
+    # We need to unconditionally create a file for each batch for transpose to work
+    while read -r b; do
+      touch "by_proband/${b}" "by_father/${b}" "fathers/${b}" "by_mothers/${b}" "mothers/${b}"
+    done <(sort -u '~{batches}')
 
-    find batches -type f -exec basename '{}' \; \
-      | xargs -I '{}' -P '~{cpus}' bcftools view --output-type b --output 'bcfs/{}.bcf' \
-          --no-update --samples-file 'batches/{}' '~{bcf}'
+    awk -F'\t' 'FILENAME == ARGV[1] {a[$2]=$1}
+                FILENAME == ARGV[2] {b[$2]=$3;c[$2]=$4}
+                FILENAME == ARGV[3] {
+                  print $1 > ("by_proband/" a[$1])
+                  print $1 > ("by_father/" a[b[$1]])
+                  print b[$1] > ("fathers/" a[b[$1]])
+                  print $1 > ("by_mother/" a[c[$1]])
+                  print c[$1] > ("mothers/" a[c[$1]])
+                }' '~{sample_manifest}' '~{pedigree}' bcf_samples
   >>>
 
   output {
-    Array[File] split_bcfs = glob("bcfs/*.bcf")
+    Array[File] by_proband = glob("by_proband/*")
+    Array[File] by_father = glob("by_father/*")
+    Array[File] fathers = glob("fathers/*")
+    Array[File] by_mother = glob("by_mother/*")
+    Array[File] mothers = glob("mothers/*")
   }
 }
 
@@ -841,8 +944,9 @@ task ConcatBcfs {
   }
 
   Float input_size = size(bcfs, "GB")
+  Int mem = ceil(input_size * 2) + 2
   RuntimeAttr default_attr = object {
-    mem_gb: ceil(2 * input_size),
+    mem_gb: mem,
     cpu_cores: 1,
     disk_gb: ceil(input_size * 5) + 16,
     boot_disk_gb: 8,
@@ -853,7 +957,7 @@ task ConcatBcfs {
 
   runtime {
     memory: mem + " GB"
-    cpu: cpus
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
     disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " HDD"
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
     preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
@@ -862,6 +966,7 @@ task ConcatBcfs {
   }
 
   String output_name = "${output_prefix}.bcf"
+  Float max_sort_mem = mem * 0.8
 
   command <<<
     set -euxo pipefail
@@ -870,13 +975,12 @@ task ConcatBcfs {
 
     while read -r src dest; do
       bcftools view ~{if defined(samples) then "--samples-file '" + select_first([samples]) + "'" else ""} \
-        --output "${dest}" \
-        --output-type b \
-        "${src}"
+        --no-update --output-type u "${src}" \
+        | bcftools view --include 'COUNT(GT="alt")' --output "${dest}" --output-type b
     done < manifest.tsv
 
-    bcftools concat --allow-overlaps --file-list <(cut -f 2 manifest.tsv) \
-      | bcftools sort --output '~{output_name}' --output-type b
+    bcftools concat --allow-overlaps --file-list <(cut -f 2 manifest.tsv) --output-type u \
+      | bcftools sort --max-mem '~{max_sort_mem}G' --output '~{output_name}' --output-type b
     bcftools index '~{output_name}'
   >>>
 
