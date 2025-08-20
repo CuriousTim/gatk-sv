@@ -67,7 +67,7 @@ Plain text bed file of non-coding elements in the reference genome.
 Plain text bed file of pseudoautosomal regions.
 
 #### pesr_exclude_list
-Block-compressed bed file of intervals for filtering calls. Variants generated with non-CNV tools (Manta, MELT, 
+Block-compressed bed file of intervals for filtering calls. Variants generated with non-CNV tools (Dragen, Manta, MELT, 
 Scramble, Wham) that have either end in any of these intervals are hard-filtered.
 
 #### preprocessed_intervals
@@ -84,7 +84,7 @@ Text file of primary contig names.
 Plain text VCF header section of primary contig sequences.
 
 #### protein_coding_gtf
-Protein coding sequence definitions for functional annotation in [General Transfer Format](https://www.ensembl.org/info/website/upload/gff.html).
+Protein-coding sequence definitions for functional annotation in [General Transfer Format](https://www.ensembl.org/info/website/upload/gff.html). This GTF was created by subsetting the [GENCODE](https://www.gencodegenes.org/human/releases.html) GRCh38 basic gene annotation GTF with the script `scripts/inputs/preprocess_gtf.py`. Transcripts annotated as either Ensembl canonical or MANE Select Plus Clinical, and as either protein-coding or from nonsense-mediated decay, were retained. The GENCODE version is included in the filename.
 
 #### reference_dict
 Reference FASTA dictionary file (`*.dict`). See [this article](https://gatk.broadinstitute.org/hc/en-us/articles/360035531652-FASTA-Reference-genome-format) for more information.

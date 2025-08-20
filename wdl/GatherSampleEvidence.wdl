@@ -20,6 +20,8 @@ workflow GatherSampleEvidence {
     String sample_id
 
     Boolean? is_dragen_3_7_8
+    # Optionally pass in DRAGEN-SV VCF if available
+    File? dragen_vcf
 
     # Evidence collection flags
     Boolean collect_coverage = true
@@ -271,7 +273,7 @@ workflow GatherSampleEvidence {
         original_bam_or_cram_file = reads_file_,
         original_bam_or_cram_index = reads_index_,
         counts_file = select_first([CollectCounts.counts]),
-        manta_vcf = select_first([Manta.vcf, manta_vcf_input]),
+        input_vcf = select_first([dragen_vcf, Manta.vcf, manta_vcf_input]),
         sample_name = sample_id,
         reference_fasta = reference_fasta,
         reference_index = reference_index,
@@ -315,7 +317,7 @@ workflow GatherSampleEvidence {
           original_bam_or_cram_file = reads_file_,
           original_bam_or_cram_index = reads_index_,
           counts_file = select_first([CollectCounts.counts]),
-          manta_vcf = select_first([Manta.vcf, manta_vcf_input]),
+          input_vcf = select_first([dragen_vcf, Manta.vcf, manta_vcf_input]),
           sample_name = sample_id,
           reference_fasta = reference_fasta,
           reference_index = reference_index,
@@ -541,7 +543,7 @@ task RealignSoftClippedReads {
     RuntimeAttr? runtime_attr_override
   }
 
-  RuntimeAttr default_attr = object {
+  RuntimeAttr runtime_default = object {
                                cpu_cores: 4,
                                mem_gb: 20,
                                disk_gb: ceil(10 + size(reads_path, "GB") * 2 + size([reference_bwa_bwt, reference_bwa_pac, reference_bwa_sa], "GB")),
@@ -549,9 +551,18 @@ task RealignSoftClippedReads {
                                preemptible_tries: 3,
                                max_retries: 1
                              }
-  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-  Int n_cpu = select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+  RuntimeAttr runtime_override = select_first([runtime_attr_override, runtime_default])
   String disk_type = if use_ssd then "SSD" else "HDD"
+
+  runtime {
+    memory: "~{select_first([runtime_override.mem_gb, runtime_default.mem_gb])} GiB"
+    disks: "local-disk ~{select_first([runtime_override.disk_gb, runtime_default.disk_gb])} ~{disk_type}"
+    cpu: select_first([runtime_override.cpu_cores, runtime_default.cpu_cores])
+    preemptible: select_first([runtime_override.preemptible_tries, runtime_default.preemptible_tries])
+    maxRetries: select_first([runtime_override.max_retries, runtime_default.max_retries])
+    docker: sv_base_mini_docker
+    bootDiskSizeGb: select_first([runtime_override.boot_disk_gb, runtime_default.boot_disk_gb])
+  }
 
   output {
     File out = "~{sample_id}.realign_soft_clipped_reads.bam"
@@ -586,13 +597,4 @@ task RealignSoftClippedReads {
       | samtools view -1 -h -O BAM -o ~{sample_id}.realign_soft_clipped_reads.bam
     samtools index -@${N_CORES} ~{sample_id}.realign_soft_clipped_reads.bam
   >>>
-  runtime {
-    cpu: n_cpu
-    memory: select_first([runtime_attr.mem_gb, default_attr.mem_gb]) + " GiB"
-    disks: "local-disk " + select_first([runtime_attr.disk_gb, default_attr.disk_gb]) + " " + disk_type
-    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-    docker: sv_base_mini_docker
-    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-  }
 }

@@ -108,11 +108,12 @@ workflow GatherBatchEvidence {
     Float? defragment_max_dist
 
     # SV tool calls
+    Array[File]? dragen_vcfs       # Dragen VCF
     Array[File]? manta_vcfs        # Manta VCF
     Array[File]? melt_vcfs         # Melt VCF
     Array[File]? scramble_vcfs     # Scramble VCF
     Array[File]? wham_vcfs         # Wham VCF
-    Int min_svsize                  # Minimum SV length to include
+    Int min_svsize                 # Minimum SV length to include
 
     # CNMops files
     File cnmops_chrom_file
@@ -125,10 +126,6 @@ workflow GatherBatchEvidence {
     File mei_bed
     # QC files
     Int matrix_qc_distance
-
-    # Allosomes
-    String? chr_x
-    String? chr_y
 
     # Module metrics parameters
     # Run module metrics workflow at the end - off by default for GatherBatchEvidence because of runtime/expense
@@ -210,8 +207,6 @@ workflow GatherBatchEvidence {
       input:
         bincov_matrix = merged_bincov_,
         batch = batch,
-        chr_x = chr_x,
-        chr_y = chr_y,
         sv_base_mini_docker = sv_base_mini_docker,
         sv_pipeline_qc_docker = sv_pipeline_qc_docker,
         runtime_attr_score = ploidy_score_runtime_attr,
@@ -403,6 +398,7 @@ workflow GatherBatchEvidence {
   call pp.PreprocessPESR as PreprocessPESR {
     input:
       samples = samples,
+      dragen_vcfs = dragen_vcfs,
       manta_vcfs = manta_vcfs,
       melt_vcfs = melt_vcfs,
       scramble_vcfs = scramble_vcfs,
@@ -413,11 +409,11 @@ workflow GatherBatchEvidence {
       sv_pipeline_docker = sv_pipeline_docker,
       runtime_attr = preprocess_calls_runtime_attr
   }
-  if (defined(manta_vcfs)) {
+  if (defined(dragen_vcfs) || defined(manta_vcfs)) {
       call tiny.TinyResolve as TinyResolve {
         input:
           samples = samples,
-          manta_vcf_tar = select_first([PreprocessPESR.std_manta_vcf_tar]),
+          vcf_tar = select_first([PreprocessPESR.std_dragen_vcf_tar, PreprocessPESR.std_manta_vcf_tar]),
           cytoband=cytoband,
           discfile=PE_files,
           mei_bed=mei_bed,
@@ -500,6 +496,7 @@ workflow GatherBatchEvidence {
 
     File median_cov = MedianCov.medianCov
 
+    File? std_dragen_vcf_tar = PreprocessPESR.std_dragen_vcf_tar
     File? std_manta_vcf_tar = PreprocessPESR.std_manta_vcf_tar
     File? std_melt_vcf_tar = PreprocessPESR.std_melt_vcf_tar
     File? std_scramble_vcf_tar = PreprocessPESR.std_scramble_vcf_tar
@@ -512,7 +509,6 @@ workflow GatherBatchEvidence {
     File? Matrix_QC_plot = MatrixQC.QC_plot
     
     Array[File]? manta_tloc = TinyResolve.tloc_manta_vcf
-
     File? metrics_file_batchevidence = GatherBatchEvidenceMetrics.metrics_file
   }
 }
