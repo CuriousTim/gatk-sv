@@ -929,7 +929,7 @@ task GroupProbandsByBatch {
     mkdir by_proband by_father fathers by_mother mothers
     # We need to unconditionally create a file for each batch for transpose to work
     while read -r b; do
-      touch "by_proband/${b}" "by_father/${b}" "fathers/${b}" "by_mothers/${b}" "mothers/${b}"
+      touch "by_proband/${b}" "by_father/${b}" "fathers/${b}" "by_mother/${b}" "mothers/${b}"
     done < <(sort -u '~{batches}')
 
     awk -F'\t' 'FILENAME == ARGV[1] {a[$2]=$1}
