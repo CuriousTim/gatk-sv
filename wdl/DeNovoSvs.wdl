@@ -427,7 +427,7 @@ COPY (
                 names = ['batch', 'bincov'])
 ) TO 'bincov_manifest.json' (FORMAT JSON);
 COPY (
-  SELECT json_group_object(batch, bincov) AS bincov_index
+  SELECT json_group_object(batch, bincov_index) AS bincov_index
   FROM read_csv('bincov_index.tsv',
                 delim = '\t',
                 header = false,
