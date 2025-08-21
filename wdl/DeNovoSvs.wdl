@@ -930,7 +930,7 @@ task GroupProbandsByBatch {
     # We need to unconditionally create a file for each batch for transpose to work
     while read -r b; do
       touch "by_proband/${b}" "by_father/${b}" "fathers/${b}" "by_mothers/${b}" "mothers/${b}"
-    done <(sort -u '~{batches}')
+    done < <(sort -u '~{batches}')
 
     awk -F'\t' 'FILENAME == ARGV[1] {a[$2]=$1}
                 FILENAME == ARGV[2] {b[$2]=$3;c[$2]=$4}
