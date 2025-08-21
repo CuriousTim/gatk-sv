@@ -819,7 +819,6 @@ task FilterProbandSites {
   }
 
   String output_bcf = basename(bcf)
-  Array[File] bl = if defined(exclude_regions) then select_first([exclude_regions]) else []
 
   command <<<
     set -euxo pipefail
