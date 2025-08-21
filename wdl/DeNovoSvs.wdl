@@ -235,8 +235,8 @@ workflow DeNovoSvs {
       scatter (j in range(length(proband_batch_grouped_bcfs[i]))) {
         call SVConcordance.SVConcordanceTask as proband_v_proband {
           input:
-            truth_vcf = concat_proband_batch_raw.merged_bcf,
-            eval_vcf = proband_batch_grouped_bcfs[i][j],
+            truth_vcf = proband_batch_grouped_bcfs[i][j],
+            eval_vcf = concat_proband_batch_raw.merged_bcf,
             output_prefix = "proband_v_proband-" + kept_contigs[j],
             contig = kept_contigs[j],
             reference_dict = reference_dict,
@@ -263,8 +263,8 @@ workflow DeNovoSvs {
       scatter (j in range(length(father_batch_grouped_bcfs[i]))) {
         call SVConcordance.SVConcordanceTask as proband_v_father {
           input:
-            truth_vcf = concat_father_batch_raw.merged_bcf,
-            eval_vcf = father_batch_grouped_bcfs[i][j],
+            truth_vcf = father_batch_grouped_bcfs[i][j],
+            eval_vcf = concat_father_batch_raw.merged_bcf,
             output_prefix = "proband_v_father-" + kept_contigs[j],
             contig = kept_contigs[j],
             reference_dict = reference_dict,
@@ -291,8 +291,8 @@ workflow DeNovoSvs {
       scatter (j in range(length(mother_batch_grouped_bcfs[i]))) {
         call SVConcordance.SVConcordanceTask as proband_v_mother {
           input:
-            truth_vcf = concat_mother_batch_raw.merged_bcf,
-            eval_vcf = mother_batch_grouped_bcfs[i][j],
+            truth_vcf = mother_batch_grouped_bcfs[i][j],
+            eval_vcf = concat_mother_batch_raw.merged_bcf,
             output_prefix = "proband_v_mother-" + kept_contigs[j],
             contig = kept_contigs[j],
             reference_dict = reference_dict,
