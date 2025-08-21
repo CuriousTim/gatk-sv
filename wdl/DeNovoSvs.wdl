@@ -52,9 +52,7 @@ workflow DeNovoSvs {
     Array[String] clustered_depth_vcf
 
     # Dockers
-    String linux_docker
     String sv_base_mini_docker
-    String sv_pipeline_docker
     String gatk_docker
     String denovo_docker
 
