@@ -280,7 +280,7 @@ workflow DeNovoSvs {
       call ConcatBcfs as concat_mother_batch_raw {
         input:
           bcfs = MakeManifests.pesr_map[by_mother_batch_id],
-          samples = mother_batch_proband_ids[i][0],
+          samples = mother_batch_mother_ids[i][0],
           output_prefix = by_mother_batch_id,
           sv_base_mini_docker = sv_base_mini_docker,
           runtime_attr_override = runtime_override_concat_bcfs
