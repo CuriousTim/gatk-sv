@@ -7,11 +7,9 @@ ARG DUCKDB_URI="https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VER
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
-    apt-transport-https \
-    ca-certificates \
-    curl \
+    unzip \
   && rm -rf /var/lib/apt/lists/*
 
-RUN curl -L -o duckdb_cli-linux-amd64.zip "${DUCKDB_URI}" \
-  && unzip duckdb_cli-linux-amd64.zip -d /usr/local/bin \
-  && rm duckdb_cli-linux-amd64.zip
+ADD $DUCKDB_URI /tmp/duckdb_cli-linux-amd64.zip
+RUN unzip /tmp/duckdb_cli-linux-amd64.zip -d /usr/local/bin \
+  && rm /tmp/duckdb_cli-linux-amd64.zip
