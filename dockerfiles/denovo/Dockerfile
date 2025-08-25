@@ -1,5 +1,4 @@
-ARG SV_PIPELINE_IMAGE=sv-pipeline:latest
-FROM $SV_PIPELINE_IMAGE
+FROM ubuntu:24.04
 
 ARG DUCKDB_VERSION="1.3.2"
 ARG DUCKDB_URI="https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/duckdb_cli-linux-amd64.zip"
