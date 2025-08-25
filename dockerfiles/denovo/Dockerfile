@@ -9,7 +9,8 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     apt-transport-https \
     ca-certificates \
-    curl
+    curl \
+  && rm -rf /var/lib/apt/lists/*
 
 RUN curl -L -o duckdb_cli-linux-amd64.zip "${DUCKDB_URI}" \
   && unzip duckdb_cli-linux-amd64.zip -d /usr/local/bin \
