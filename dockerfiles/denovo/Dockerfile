@@ -5,6 +5,12 @@ ARG DUCKDB_URI="https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VER
 
 # COPY /src/denovo /src/denovo/
 
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    apt-transport-https \
+    ca-certificates \
+    curl
+
 RUN curl -L -o duckdb_cli-linux-amd64.zip "${DUCKDB_URI}" \
   && unzip duckdb_cli-linux-amd64.zip -d /usr/local/bin \
   && rm duckdb_cli-linux-amd64.zip
