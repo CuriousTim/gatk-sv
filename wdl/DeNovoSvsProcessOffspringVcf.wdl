@@ -65,18 +65,18 @@ workflow DeNovoSvsProcessOffspringVcf {
     Array[File] mother_batch_mother_ids = GroupOffspringByBatch.mothers
   }
 
-  call SubsetBcfBySamples as make_proband_bcf {
+  call SubsetBcfBySamples as make_offspring_bcf {
     input:
       bcf = vcf,
       samples = offspring,
-      subset_prefix = "offspring-",
+      subset_prefix = "offspring",
       sv_base_mini_docker = sv_base_mini_docker,
       runtime_attr_override = runtime_override_subset_bcf_by_samples
   }
 
   call RemoveUncalledSvtypes {
     input:
-      bcf = make_proband_bcf.subset_bcf,
+      bcf = make_offspring_bcf.subset_bcf,
       sv_base_mini_docker = sv_base_mini_docker,
       runtime_attr_override = runtime_override_remove_uncalled_svtypes
   }
@@ -240,7 +240,7 @@ task RemoveUncalledSvtypes {
     docker: sv_base_mini_docker
   }
 
-  String filtered_bcf_name = "sites_filtered-" + basename(bcf)
+  String filtered_bcf_name = "svtypes_filtered-" + basename(bcf)
   String cpx_vcf_name = "cpx_ctx-" + basename(bcf, ".bcf") + ".vcf.gz"
 
   command <<<
