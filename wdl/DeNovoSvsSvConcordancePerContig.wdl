@@ -116,6 +116,7 @@ task ConcatRawEvidence {
   command <<<
     set -euxo pipefail
 
+    LC_ALL=C sort -u '~{samples}' > samples_uniq
     contigs='~{write_lines(contigs)}'
     mkdir splits
     declare -i i=0
@@ -126,7 +127,8 @@ task ConcatRawEvidence {
         if [[ ! -d "${dest}" ]]; then
           mkdir "${dest}"
         fi
-        bcftools view --samples-file '~{samples}' --regions "${contig}" --no-update --output-type u "${src}" \
+        bcftools view --samples-file 'samples_uniq' --regions "${contig}" --no-update \
+          --output-type u "${src}" \
           | bcftools view --include 'COUNT(GT="alt")' --output "${dest}/${i}.bcf" --output-type b
       done < "${contigs}"
       i+=1
