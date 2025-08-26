@@ -128,7 +128,7 @@ task ConcatRawEvidence {
           mkdir "${dest}"
         fi
         bcftools view --samples-file 'samples_uniq' --regions "${contig}" --no-update \
-          --output-type u "${src}" \
+          --exclude 'INFO/SVTYPE == "BND"' --output-type u "${src}" \
           | bcftools view --include 'COUNT(GT="alt")' --output "${dest}/${i}.bcf" --output-type b
         bcftools index "${dest}/${i}.bcf"
       done < "${contigs}"
