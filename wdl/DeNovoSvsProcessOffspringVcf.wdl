@@ -140,8 +140,7 @@ workflow DeNovoSvsProcessOffspringVcf {
   }
 }
 
-# Subset a VCF/BCF to a set of samples, excluding sites that do not have any ALT genotypes after
-# subsetting. Output will be a BCF or an empty file.
+# Subset a VCF/BCF to a set of samples. Output will be a BCF or an empty file.
 task SubsetBcfBySamples {
   input {
     File bcf
@@ -190,8 +189,8 @@ task SubsetBcfBySamples {
     set -euxo pipefail
 
     if [[ -s '~{samples}' ]]; then
-      bcftools view --output-type u --no-update --samples-file '~{samples}' '~{bcf}' \
-        | bcftools view --include 'COUNT(GT="alt") > 0' --output-type b --output '~{subset_bcf_name}'
+      bcftools view --no-update --samples-file '~{samples}' --output-type b \
+        --output '~{subset_bcf_name}' '~{bcf}'
     else
       touch '~{subset_bcf_name}'
     fi
