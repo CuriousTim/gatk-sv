@@ -157,7 +157,7 @@ task MakeRawEvidenceMap {
   }
 
   output {
-    Map[String, File] contig_map = read_map("raw.tsv")
+    Map[String, String] contig_map = read_map("raw.tsv")
   }
 
   runtime {
@@ -173,9 +173,10 @@ task MakeRawEvidenceMap {
   command <<<
     set -euxo pipefail
 
+    : > raw.tsv
     while read -r p; do
       bn="$(basename "${p}")"
-      printf '%s\t%s\n' "${bn%.bcf}" "${p}" > raw.tsv
+      printf '%s\t%s\n' "${bn%.bcf}" "${p}" >> raw.tsv
     done < '~{write_lines(bcf_paths)}'
   >>>
 }
