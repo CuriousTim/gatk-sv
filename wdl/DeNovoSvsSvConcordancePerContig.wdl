@@ -48,7 +48,7 @@ workflow DeNovoSvsSvConcordancePerContig {
 
   call MakeRawEvidenceMap {
     input:
-      bcf_paths = ConcatRawEvidence.concat_bcfs,
+      vcf_paths = ConcatRawEvidence.concat_vcfs,
       linux_docker = linux_docker
   }
 
@@ -56,8 +56,10 @@ workflow DeNovoSvsSvConcordancePerContig {
     String current_contig = contigs[i]
     call SVConcordance {
       input:
-        truth_bcf = MakeRawEvidenceMap.contig_map[current_contig],
+        truth_vcf = MakeRawEvidenceMap.contig_map[current_contig],
+        truth_vcf_index = "${MakeRawEvidenceMap.contig_map[current_contig]}.csi",
         eval_bcf = eval_bcfs[i],
+        eval_bcf_index = "${eval_bcfs[i]}.csi",
         concordance_prefix = "${batch}-${current_contig}",
         reference_dict = reference_dict,
         svconcordance_keep_all_docker = svconcordance_keep_all_docker,
@@ -84,7 +86,7 @@ task ConcatRawEvidence {
   }
 
   output {
-    Array[File] concat_bcfs = glob("merged/*.bcf")
+    Array[File] concat_vcfs = glob("merged/*.vcf.gz")
     Array[File] concat_bcf_indexes = glob("merged/*.csi")
   }
 
@@ -139,20 +141,20 @@ task ConcatRawEvidence {
     while read -r contig; do
       bcftools concat --allow-overlaps --file-list <(find "splits/${contig}" -type f -name '*.bcf') \
         --output-type u \
-        | bcftools sort --max-mem '~{max_sort_mem}G' --output "merged/${contig}.bcf" --output-type b
-      bcftools index "merged/${contig}.bcf"
+        | bcftools sort --max-mem '~{max_sort_mem}G' --output "merged/${contig}.vcf.gz" --output-type z
+      bcftools index "merged/${contig}.vcf.gz"
     done < "${contigs}"
   >>>
 }
 
 task MakeRawEvidenceMap {
   input {
-    Array[String] bcf_paths
+    Array[String] vcf_paths
     String linux_docker
   }
 
   parameter_meta {
-    bcf_paths: "Paths to the merged raw evidence files, split by contig."
+    vcf_paths: "Paths to the merged raw evidence files, split by contig."
     linux_docker: "A Linux Docker image."
   }
 
@@ -176,15 +178,17 @@ task MakeRawEvidenceMap {
     : > raw.tsv
     while read -r p; do
       bn="$(basename "${p}")"
-      printf '%s\t%s\n' "${bn%.bcf}" "${p}" >> raw.tsv
-    done < '~{write_lines(bcf_paths)}'
+      printf '%s\t%s\n' "${bn%.vcf.gz}" "${p}" >> raw.tsv
+    done < '~{write_lines(vcf_paths)}'
   >>>
 }
 
 task SVConcordance {
   input {
-    File truth_bcf
+    File truth_vcf
+    File truth_vcf_index
     File eval_bcf
+    File eval_bcf_index
     String concordance_prefix
     File reference_dict
     String svconcordance_keep_all_docker
@@ -192,8 +196,8 @@ task SVConcordance {
   }
 
   parameter_meta {
-    truth_bcf: "BCF against which to match variants."
-    eval_bcf: "BCF to annotate with variants matched in the truth BCF."
+    truth_vcf: "VCF against which to match variants."
+    eval_bcf: "BCF to annotate with variants matched in the truth VCF."
     concordance_prefix: "Prefix to use for the output BCF."
     reference_dict: "Sequence dictionary in the form of a '.dict' file."
     svconcordance_keep_all_docker: "Docker with a build of GATK that supports the `--keep-all` option of SVConcordance."
@@ -204,7 +208,7 @@ task SVConcordance {
     File concordance_vcf = concordance_name
   }
 
-  Float input_size = size([truth_bcf, eval_bcf], "GB")
+  Float input_size = size([truth_vcf, eval_bcf], "GB")
   RuntimeAttr default_attr = object {
     mem_gb: 4,
     cpu_cores: 1,
@@ -230,10 +234,12 @@ task SVConcordance {
   command <<<
     set -euxo pipefail
 
+    bcftools view --output-type z --output 'eval.vcf.gz' '~{eval_bcf}'
+
     gatk --java-options "-Xmx3400M" SVConcordance \
       --sequence-dictionary '~{reference_dict}' \
-      --eval '~{eval_bcf}' \
-      --truth '~{truth_bcf}' \
+      --eval 'eval.vcf.gz' \
+      --truth '~{truth_vcf}' \
       --output '~{concordance_name}'
   >>>
 }
