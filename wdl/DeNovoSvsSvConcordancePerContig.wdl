@@ -59,7 +59,6 @@ workflow DeNovoSvsSvConcordancePerContig {
         truth_vcf = MakeRawEvidenceMap.contig_map[current_contig],
         truth_vcf_index = "${MakeRawEvidenceMap.contig_map[current_contig]}.csi",
         eval_bcf = eval_bcfs[i],
-        eval_bcf_index = "${eval_bcfs[i]}.csi",
         concordance_prefix = "${batch}-${current_contig}",
         reference_dict = reference_dict,
         svconcordance_keep_all_docker = svconcordance_keep_all_docker,
@@ -188,7 +187,6 @@ task SVConcordance {
     File truth_vcf
     File truth_vcf_index
     File eval_bcf
-    File eval_bcf_index
     String concordance_prefix
     File reference_dict
     String svconcordance_keep_all_docker
@@ -197,6 +195,7 @@ task SVConcordance {
 
   parameter_meta {
     truth_vcf: "VCF against which to match variants."
+    truth_vcf_index: "Index file of the truth VCF."
     eval_bcf: "BCF to annotate with variants matched in the truth VCF."
     concordance_prefix: "Prefix to use for the output BCF."
     reference_dict: "Sequence dictionary in the form of a '.dict' file."
