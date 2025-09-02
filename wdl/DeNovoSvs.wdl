@@ -978,7 +978,7 @@ task MergeOffspringSites {
   command <<<
     set -euxo pipefail
 
-    bcftools concat --file-list '~{write_lines(bcfs)}' --ouput '~{vcf_name}' \
+    bcftools concat --file-list '~{write_lines(bcfs)}' --output '~{vcf_name}' \
       --output-type z
     bcftools index '~{vcf_name}'
   >>>
