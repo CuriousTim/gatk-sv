@@ -1057,7 +1057,9 @@ task MergeClusteredBatchVcfs {
       dest_dir="algo_${i}"
       mkdir "${dest_dir}"
       bcftools +split --groups-file groups.tsv --output "${dest_dir}" --output-type b "${vcf}"
-      bcftools view --drop-genotypes --exclude 'INFO/SVTYPE == "BND"' --output-type b --output "${dest_dir}/sites_only.bcf"
+      bcftools view --drop-genotypes --exclude 'INFO/SVTYPE == "BND"' --output-type b \
+        --output "${dest_dir}/sites_only.bcf" "${vcf}"
+      i=$((i + 1))
     done < "${vcfs}"
 
     find . -type f -name 'offspring.bcf' \
