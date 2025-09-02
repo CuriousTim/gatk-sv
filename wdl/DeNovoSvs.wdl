@@ -908,7 +908,7 @@ task MatchBcfToContig {
     set -euxo pipefail
 
     bcftools view --drop-genotypes --output-type u '~{bcf}' \
-      | bcftools sort --max-mem '~{max_sort_mem}' --output '~{sites_only_bcf_name}' \
+      | bcftools sort --max-mem '~{max_sort_mem}G' --output '~{sites_only_bcf_name}' \
           --output-type b
     bcftools index '~{sites_only_bcf_name}'
     bcftools index --stats '~{sites_only_bcf_name}' | cut -f 1 > contigs_in_bcf.list
@@ -1080,7 +1080,7 @@ task MergeClusteredBatchVcfs {
 
     bcftools concat --file-list <(find . -type f -name 'sites_only.bcf') --allow-overlaps \
       --output-type u \
-      | bcftools sort --max-mem '~{max_sort_mem}' --output '~{batch_id}-sites_only-merged.vcf.gz' \
+      | bcftools sort --max-mem '~{max_sort_mem}G' --output '~{batch_id}-sites_only-merged.vcf.gz' \
         --output-type z
     bcftools index '~{batch_id}-sites_only-merged.vcf.gz'
   >>>
