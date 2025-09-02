@@ -123,6 +123,6 @@ task GroupBcfByFamilyBatch {
     else
       touch '~{by_mother_name}'
     fi
-    bcftools +split --groups-file groups.tsv --output-type b '~{bcf}'
+    bcftools +split --groups-file groups.tsv --output "${PWD}" --output-type b '~{bcf}'
   >>>
 }
