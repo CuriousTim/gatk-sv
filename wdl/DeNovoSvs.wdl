@@ -1059,21 +1059,22 @@ task MergeClusteredBatchVcfs {
       bcftools +split --groups-file groups.tsv --output "${dest_dir}" --output-type b "${vcf}"
       bcftools view --drop-genotypes --exclude 'INFO/SVTYPE == "BND"' --output-type b \
         --output "${dest_dir}/sites_only.bcf" "${vcf}"
+      bcftools index "${dest_dir}/sites_only.bcf"
       i=$((i + 1))
     done < "${vcfs}"
 
     find . -type f -name 'offspring.bcf' \
-      | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
+      | xargs -L 1 bcftools query --include 'GT="alt"' --format '%CHROM\t%ID[\t%SAMPLE]\n' \
       | gzip -c > '~{batch_id}-offspring_genotypes.tsv.gz'
     touch  '~{batch_id}-offspring_genotypes.tsv.gz'
 
     find . -type f -name 'father.bcf' \
-      | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
+      | xargs -L 1 bcftools query --include 'GT="alt"' --format '%CHROM\t%ID[\t%SAMPLE]\n' \
       | gzip -c > '~{batch_id}-father_genotypes.tsv.gz'
     touch  '~{batch_id}-father_genotypes.tsv.gz'
 
     find . -type f -name 'mother.bcf' \
-      | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
+      | xargs -L 1 bcftools query --include 'GT="alt"' --format '%CHROM\t%ID[\t%SAMPLE]\n' \
       | gzip -c > '~{batch_id}-mother_genotypes.tsv.gz'
     touch '~{batch_id}-mother_genotypes.tsv.gz'
 
