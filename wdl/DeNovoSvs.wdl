@@ -950,7 +950,7 @@ task MergeOffspringSites {
 
   output {
     File merged_vcf = vcf_name
-    File merged_vcf_index = "${vcf_name}.csi"
+    File merged_vcf_index = "${vcf_name}.tbi"
   }
 
   RuntimeAttr default_attr = object {
@@ -980,7 +980,7 @@ task MergeOffspringSites {
 
     bcftools concat --file-list '~{write_lines(bcfs)}' --output '~{vcf_name}' \
       --output-type z
-    bcftools index '~{vcf_name}'
+    bcftools index --tbi '~{vcf_name}'
   >>>
 }
 
@@ -1008,7 +1008,7 @@ task MergeClusteredBatchVcfs {
 
   output {
     File merged_vcf = "${batch_id}-sites_only-merged.vcf.gz"
-    File merged_vcf_index = "${batch_id}-sites_only-merged.vcf.gz.csi"
+    File merged_vcf_index = "${batch_id}-sites_only-merged.vcf.gz.tbi"
     File offspring_genotypes = "${batch_id}-offspring_genotypes.tsv.gz"
     File father_genotypes = "${batch_id}-father_genotypes.tsv.gz"
     File mother_genotypes = "${batch_id}-mother_genotypes.tsv.gz"
@@ -1082,7 +1082,7 @@ task MergeClusteredBatchVcfs {
       --output-type u \
       | bcftools sort --max-mem '~{max_sort_mem}G' --output '~{batch_id}-sites_only-merged.vcf.gz' \
         --output-type z
-    bcftools index '~{batch_id}-sites_only-merged.vcf.gz'
+    bcftools index --tbi '~{batch_id}-sites_only-merged.vcf.gz'
   >>>
 }
 
