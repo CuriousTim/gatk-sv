@@ -1141,6 +1141,7 @@ task SVConcordance {
     set -euxo pipefail
 
     gatk --java-options '-Xmx~{jvm_mem}M' SVConcordance \
+      --keep-all \
       --sequence-dictionary '~{reference_dict}' \
       --eval '~{eval_vcf}' \
       --truth '~{truth_vcf}'\
