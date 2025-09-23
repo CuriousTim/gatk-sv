@@ -23,7 +23,8 @@ RUN unzip /tmp/duckdb_cli-linux-amd64.zip -d /usr/local/bin \
   && rm /tmp/duckdb_cli-linux-amd64.zip
 
 ADD "${HTSLIB_URI}" /tmp/htslib.tar.bz2
-RUN tar -jxf htslib.tar.bz2 \
+RUN cd /tmp \
+  && tar -jxf htslib.tar.bz2 \
   && cd "htslib-${HTSLIB_VERSION}" \
   && ./configure --prefix=/usr/local \
     --with-libdeflate \
@@ -33,7 +34,8 @@ RUN tar -jxf htslib.tar.bz2 \
   && rm -rf "htslib-${HTSLIB_VERSION}" htslib.tar.bz2
 
 ADD "${BCFTOOLS_URI}" /tmp/bcftools.tar.bz2
-RUN tar -jxf bcftools.tar.bz2 \
+RUN cd /tmp \
+  && tar -jxf bcftools.tar.bz2 \
   && cd "bcftools-${BCFTOOLS_VERSION}" \
   && ./configure --prefix=/usr/local \
     --with-htslib=/usr/local \
