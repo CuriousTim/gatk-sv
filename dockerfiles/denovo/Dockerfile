@@ -34,6 +34,8 @@ RUN cd /tmp \
   && cd .. \
   && rm -rf "htslib-${HTSLIB_VERSION}" htslib.tar.bz2
 
+RUN ldconfig
+
 ADD "${BCFTOOLS_URI}" /tmp/bcftools.tar.bz2
 RUN cd /tmp \
   && tar -jxf bcftools.tar.bz2 \
