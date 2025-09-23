@@ -1196,7 +1196,7 @@ task FilterGenotypes {
     File mother_genotypes
     File concordance_vcf
     File pedigree
-    File denovo_docker
+    String denovo_docker
     RuntimeAttr? runtime_attr_override
   }
 
