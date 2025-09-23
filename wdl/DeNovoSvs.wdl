@@ -631,9 +631,9 @@ task GroupOffspringByBatch {
                 FILENAME == ARGV[3] {
                   print $1 > ("by_offspring/" a[$1])
                   print $1 > ("by_father/" a[b[$1]])
-                  print b[$1] > ("fathers/" a[b[$1]])
+                  print b[$1] | ("sort -u > fathers/" a[b[$1]])
                   print $1 > ("by_mother/" a[c[$1]])
-                  print c[$1] > ("mothers/" a[c[$1]])
+                  print c[$1] | ("sort -u > mothers/" a[c[$1]])
                 }' '~{sample_manifest}' '~{pedigree}' '~{offspring}'
   >>>
 }
@@ -1103,17 +1103,14 @@ task MergeClusteredBatchVcfs {
     find . -type f -name 'offspring.bcf' \
       | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
       | gzip -c > '~{batch_id}-offspring_genotypes.tsv.gz'
-    touch  '~{batch_id}-offspring_genotypes.tsv.gz'
 
     find . -type f -name 'father.bcf' \
       | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
       | gzip -c > '~{batch_id}-father_genotypes.tsv.gz'
-    touch  '~{batch_id}-father_genotypes.tsv.gz'
 
     find . -type f -name 'mother.bcf' \
       | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
       | gzip -c > '~{batch_id}-mother_genotypes.tsv.gz'
-    touch '~{batch_id}-mother_genotypes.tsv.gz'
 
     bcftools concat --file-list <(find . -type f -name 'sites_only.bcf') --allow-overlaps \
       --output-type u \
