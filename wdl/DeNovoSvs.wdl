@@ -215,8 +215,8 @@ workflow DeNovoSvs {
         vcfs = MakeManifests.raw_vcf_map[current_batch],
         batch_id = current_batch,
         offspring_ids = by_offspring_batch[i],
-        father_ids = by_father_batch[i],
-        mother_ids = by_mother_batch[i],
+        father_ids = father_ids[i],
+        mother_ids = mother_ids[i],
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_merge_clustered_batch_vcfs
     }
