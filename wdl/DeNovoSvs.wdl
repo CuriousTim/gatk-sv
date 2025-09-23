@@ -64,10 +64,12 @@ workflow DeNovoSvs {
     RuntimeAttr? runtime_override_group_bcf_by_family_batch
     RuntimeAttr? runtime_override_merge_clustered_batch_vcfs
     RuntimeAttr? runtime_override_sv_concordance
+    RuntimeAttr? runtime_override_filter_genotypes
+    RuntimeAttr? runtime_override_make_denovo_calls
   }
 
   output {
-    Array[File] concordance_vcfs = SVConcordance.concordance_vcf
+    Array[File] denovo_tsvs = MakeDeNovoCalls.denovos_tsv
   }
 
   call MakeManifests {
@@ -229,6 +231,37 @@ workflow DeNovoSvs {
         reference_dict = reference_dict,
         svconcordance_keep_all_docker = svconcordance_keep_all_docker,
         runtime_attr_override = runtime_override_sv_concordance
+    }
+
+    call FilterGenotypes {
+      input:
+        batch_id = current_batch,
+        contigs = kept_contigs,
+        by_offspring_batch_bcfs = offspring_batch_grouped_bcfs[i],
+        by_father_batch_bcfs = father_batch_grouped_bcfs[i],
+        by_mother_batch_bcfs = mother_batch_grouped_bcfs[i],
+        offspring_genotypes = MergeClusteredBatchVcfs.offspring_genotypes,
+        father_genotypes = MergeClusteredBatchVcfs.father_genotypes,
+        mother_genotypes = MergeClusteredBatchVcfs.mother_genotypes,
+        concordance_vcf = SVConcordance.concordance_vcf,
+        denovo_docker = denovo_docker,
+        runtime_attr_override = runtime_override_filter_genotypes
+    }
+  }
+
+  Array[Array[File]] offspring_gt_filtered_tsvs = transpose(FilterGenotypes.self_filtered_tsvs)
+  Array[Array[File]] father_gt_filtered_tsvs = transpose(FilterGenotypes.father_filtered_tsvs)
+  Array[Array[File]] mother_gt_filtered_tsvs = transpose(FilterGenotypes.mother_filtered_tsvs)
+
+  scatter (i in range(length(kept_contigs))) {
+    call MakeDeNovoCalls {
+      input:
+        offspring_filtered_tsvs = offspring_gt_filtered_tsvs[i],
+        father_filtered_tsvs = father_gt_filtered_tsvs[i],
+        mother_filtered_tsvs = mother_gt_filtered_tsvs[i],
+        contig = kept_contigs[i],
+        denovo_docker = denovo_docker,
+        runtime_attr_override = runtime_override_make_denovo_calls
     }
   }
 }
@@ -1057,24 +1090,23 @@ task MergeClusteredBatchVcfs {
       dest_dir="algo_${i}"
       mkdir "${dest_dir}"
       bcftools +split --groups-file groups.tsv --output "${dest_dir}" --output-type b "${vcf}"
-      bcftools view --drop-genotypes --exclude 'INFO/SVTYPE == "BND"' --output-type b \
-        --output "${dest_dir}/sites_only.bcf" "${vcf}"
+      bcftools view --drop-genotypes --output-type b --output "${dest_dir}/sites_only.bcf" "${vcf}"
       bcftools index "${dest_dir}/sites_only.bcf"
       i=$((i + 1))
     done < "${vcfs}"
 
     find . -type f -name 'offspring.bcf' \
-      | xargs -L 1 bcftools query --include 'GT="alt"' --format '%CHROM\t%ID[\t%SAMPLE]\n' \
+      | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
       | gzip -c > '~{batch_id}-offspring_genotypes.tsv.gz'
     touch  '~{batch_id}-offspring_genotypes.tsv.gz'
 
     find . -type f -name 'father.bcf' \
-      | xargs -L 1 bcftools query --include 'GT="alt"' --format '%CHROM\t%ID[\t%SAMPLE]\n' \
+      | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
       | gzip -c > '~{batch_id}-father_genotypes.tsv.gz'
     touch  '~{batch_id}-father_genotypes.tsv.gz'
 
     find . -type f -name 'mother.bcf' \
-      | xargs -L 1 bcftools query --include 'GT="alt"' --format '%CHROM\t%ID[\t%SAMPLE]\n' \
+      | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
       | gzip -c > '~{batch_id}-mother_genotypes.tsv.gz'
     touch '~{batch_id}-mother_genotypes.tsv.gz'
 
@@ -1146,5 +1178,206 @@ task SVConcordance {
       --eval '~{eval_vcf}' \
       --truth '~{truth_vcf}'\
       --output '~{concordance_vcf_name}'
+  >>>
+}
+
+# Filter genotypes per batch
+task FilterGenotypes {
+  input {
+    String batch_id
+    Array[String]+ contigs
+    Array[File] by_offspring_batch_bcfs
+    Array[File] by_father_batch_bcfs
+    Array[File] by_mother_batch_bcfs
+    File offspring_genotypes
+    File father_genotypes
+    File mother_genotypes
+    File concordance_vcf
+    File denovo_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  parameter_meta {
+    batch_id: "Batch ID of this batch."
+    contigs: "Contigs to keep."
+    by_offspring_batch_bcfs: "Offsprings BCFs grouped by offspring batch, split by contig."
+    by_father_batch_bcfs: "Offspring BCFs grouped by father batch, split by contig."
+    by_mother_batch_bcfs: "Offspring BCFs grouped by mother batch, split by contig."
+    offspring_genotypes: "Offspring genotypes from the MergeClusteredBatchVcfs."
+    father_genotypes: "Father genotypes from the MergeClusteredBatchVcfs."
+    mother_genotypes: "Mother genotypes from the MergeClusteredBatchVcfs."
+    concordance_vcf: "SVConcordance VCF between offspring sites and ClusterBatch sites."
+    denovo_docker: "The corresponding Docker image from GATK-SV."
+    runtime_attr_override: "Runtime attribute overrides."
+  }
+
+  output {
+    Array[File] self_filtered_tsvs = glob("offspring/*.tsv.gz")
+    Array[File] father_filtered_tsvs = glob("father/*.tsv.gz")
+    Array[File] mother_filtered_tsvs = glob("mother/*.tsv.gz")
+  }
+
+  Float disk_size = size(by_offspring_batch_bcfs, "GB")
+    + size(by_father_batch_bcfs, "GB")
+    + size(by_mother_batch_bcfs, "GB")
+    + size(offspring_genotypes, "GB")
+    + size(father_genotypes, "GB")
+    + size(mother_genotypes, "GB")
+    + size(concordance_vcf, "GB")
+
+  RuntimeAttr default_attr = object {
+    mem_gb: 4,
+    cpu_cores: 1,
+    disk_gb: ceil(disk_size * 3) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: "${select_first([runtime_attr.mem_gb, default_attr.mem_gb])} GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk ${select_first([runtime_attr.disk_gb, default_attr.disk_gb])} HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: denovo_docker
+  }
+
+  command <<<
+    set -euxo pipefail
+
+    write_gts() {
+      # a file needs to be written for each contig unconditionally for transpose
+      # to work
+      # the numeric prefix is glob to keep the order of the contigs.
+      awk 'NR == FNR {
+        a[$1] = sprintf("%s/%03d-%s.tsv.gz", dir, i++, bid)
+        system("touch " a[$1])
+      }
+      NR > FNR && ($1 in a) {
+        cmd = "gzip -c > " a[$1]
+        print $0 | cmd
+      }' dir="$1" bid='~{batch_id}' '~{write_lines(contigs)}' -
+    }
+
+    bcftools concat --file-list '~{write_lines(by_offspring_batch_bcfs)}' \
+     --output by_offspring.bcf --output-type b --naive
+    bcftools concat --file-list '~{write_lines(by_father_batch_bcfs)}' \
+      --output by_father.bcf --output-type b --naive
+    bcftools concat --file-list '~{write_lines(by_mother_batch_bcfs)}' \
+      --output by_mother.bcf --output-type b --naive
+
+    /src/denovo/filtergt by_offspring.bcf '~{concordance_vcf}' '~{offspring_genotypes}' 'self_filtered.bcf' 1
+    /src/denovo/filtergt by_father.bcf '~{concordance_vcf}' '~{father_genotypes}' 'father_filtered.bcf' 0
+    /src/denovo/filtergt by_mother.bcf '~{concordance_vcf}' '~{mother_genotypes}' 'mother_filtered.bcf' 0
+
+    mkdir offspring father mother
+
+    bcftools query --include 'GT == "alt"' \
+      --format '[%CHROM\t%POS\t%INFO/END\t%INFO/SVLEN\t%ID\t%INFO/SVTYPE\t%SAMPLE\n]' \
+      self_filtered_bcf \
+      | write_gts offspring
+    bcftools query --include 'GT == "alt"' \
+      --format '[%CHROM\t%POS\t%INFO/END\t%INFO/SVLEN\t%ID\t%INFO/SVTYPE\t%SAMPLE\n]' \
+      father_filtered_bcf\
+      | write_gts father
+    bcftools query --include 'GT == "alt"' \
+      --format '[%CHROM\t%POS\t%INFO/END\t%INFO/SVLEN\t%ID\t%INFO/SVTYPE\t%SAMPLE\n]' \
+      mother_filtered_bcf \
+      | write_gts mother
+  >>>
+}
+
+task MakeDeNovoCalls {
+  input {
+    Array[File] offspring_filtered_tsvs
+    Array[File] father_filtered_tsvs
+    Array[File] mother_filtered_tsvs
+    String contig
+    File denovo_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  parameter_meta {
+    offspring_filtered_tsvs: "Offspring genotypes filtered against offspring."
+    father_filtered_tsvs: "Offspring genotypes filtered against father."
+    mother_filtered_tsvs: "Offspring genotypes filtered against mother."
+    contig: "Contig being processed."
+    denovo_docker: "The corresponding Docker image from GATK-SV."
+    runtime_attr_override: "Runtime attribute overrides."
+  }
+
+  output {
+    File denovos_tsv = '~{contig}-denovos.tsv.gz'
+  }
+
+  Float disk_size = size(offspring_filtered_tsvs, "GB")
+    + size(father_filtered_tsvs, "GB")
+    + size(mother_filtered_tsvs, "GB")
+
+  RuntimeAttr default_attr = object {
+    mem_gb: 4,
+    cpu_cores: 1,
+    disk_gb: ceil(disk_size * 3) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: "${select_first([runtime_attr.mem_gb, default_attr.mem_gb])} GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk ${select_first([runtime_attr.disk_gb, default_attr.disk_gb])} SSD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: denovo_docker
+  }
+
+  command <<<
+    set -euxo pipefail
+
+    mkdir offspring father mother
+    cat '~{write_lines(offspring_filtered_tsvs)}' \
+      | xargs mv -t offspring
+    cat '~{write_lines(father_filtered_tsvs)}' \
+      | xargs mv -t father
+    cat '~{write_lines(mother_filtered_tsvs)}' \
+      | xargs mv -t mother
+
+    cat > commands.sql <<EOF
+    CREATE TABLE offspring AS
+    SELECT * FROM read_csv(
+        'offspring/*.tsv.gz',
+        delim = '\t',
+        header = false,
+        names = ['chr', 'start', 'end', 'svlen', 'vid', 'sid']
+    );
+    CREATE TABLE father AS
+    SELECT * FROM read_csv(
+        'father/*.tsv.gz',
+        delim = '\t',
+        header = false,
+        names = ['chr', 'start', 'end', 'svlen', 'vid', 'sid']
+    );
+    CREATE TABLE mother AS
+    SELECT * FROM read_csv(
+        'mother/*.tsv.gz',
+        delim = '\t',
+        header = false,
+        names = ['chr', 'start', 'end', 'svlen', 'vid', 'sid']
+    );
+    COPY (
+        SELECT * FROM offspring
+        NATURAL JOIN (
+            SELECT * FROM father
+            NATURAL JOIN mother
+        )
+    ) TO 'temp.tsv.gz' (FORMAT CSV, DELIMITER '\t');
+    EOF
+    mv temp.tsv.gz '~{contig}-denovos.tsv.gz'
   >>>
 }
