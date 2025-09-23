@@ -15,6 +15,7 @@ RUN apt-get update \
     libbz2-dev \
     libdeflate-dev \
     liblzma-dev \
+    zlib1g-dev \
     unzip \
   && rm -rf /var/lib/apt/lists/*
 
