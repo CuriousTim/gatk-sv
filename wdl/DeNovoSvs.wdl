@@ -244,6 +244,7 @@ workflow DeNovoSvs {
         father_genotypes = MergeClusteredBatchVcfs.father_genotypes,
         mother_genotypes = MergeClusteredBatchVcfs.mother_genotypes,
         concordance_vcf = SVConcordance.concordance_vcf,
+        pedigree = SubsetSamples.ped_subset,
         denovo_docker = denovo_docker,
         runtime_attr_override = runtime_override_filter_genotypes
     }
