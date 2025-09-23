@@ -1101,17 +1101,17 @@ task MergeClusteredBatchVcfs {
     done < "${vcfs}"
 
     find . -type f -name 'offspring.bcf' \
-      | xargs bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
+      | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
       | gzip -c > '~{batch_id}-offspring_genotypes.tsv.gz'
     touch  '~{batch_id}-offspring_genotypes.tsv.gz'
 
     find . -type f -name 'father.bcf' \
-      | xargs bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
+      | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
       | gzip -c > '~{batch_id}-father_genotypes.tsv.gz'
     touch  '~{batch_id}-father_genotypes.tsv.gz'
 
     find . -type f -name 'mother.bcf' \
-      | xargs bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
+      | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
       | gzip -c > '~{batch_id}-mother_genotypes.tsv.gz'
     touch '~{batch_id}-mother_genotypes.tsv.gz'
 
