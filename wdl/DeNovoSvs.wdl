@@ -1193,6 +1193,7 @@ task FilterGenotypes {
     File father_genotypes
     File mother_genotypes
     File concordance_vcf
+    File pedigree
     File denovo_docker
     RuntimeAttr? runtime_attr_override
   }
@@ -1207,6 +1208,7 @@ task FilterGenotypes {
     father_genotypes: "Father genotypes from the MergeClusteredBatchVcfs."
     mother_genotypes: "Mother genotypes from the MergeClusteredBatchVcfs."
     concordance_vcf: "SVConcordance VCF between offspring sites and ClusterBatch sites."
+    pedigree: "Cohort pedigree."
     denovo_docker: "The corresponding Docker image from GATK-SV."
     runtime_attr_override: "Runtime attribute overrides."
   }
@@ -1251,7 +1253,7 @@ task FilterGenotypes {
     write_gts() {
       # a file needs to be written for each contig unconditionally for transpose
       # to work
-      # the numeric prefix is glob to keep the order of the contigs.
+      # the numeric prefix is for glob to keep the order of the contigs
       awk 'NR == FNR {
         a[$1] = sprintf("%s/%03d-%s.tsv.gz", dir, i++, bid)
         system("touch " a[$1])
@@ -1269,9 +1271,19 @@ task FilterGenotypes {
     bcftools concat --file-list '~{write_lines(by_mother_batch_bcfs)}' \
       --output by_mother.bcf --output-type b --naive
 
-    /src/denovo/filtergt by_offspring.bcf '~{concordance_vcf}' '~{offspring_genotypes}' 'self_filtered.bcf' 1
-    /src/denovo/filtergt by_father.bcf '~{concordance_vcf}' '~{father_genotypes}' 'father_filtered.bcf' 0
-    /src/denovo/filtergt by_mother.bcf '~{concordance_vcf}' '~{mother_genotypes}' 'mother_filtered.bcf' 0
+    /src/denovo/filtergt by_offspring.bcf '~{concordance_vcf}' \
+      '~{offspring_genotypes}' \
+      'self_filtered.bcf'
+    cut -f2,3 '~{pedigree}' > fathers.tsv
+    /src/denovo/filtergt by_father.bcf '~{concordance_vcf}' \
+      '~{father_genotypes}' \
+      'father_filtered.bcf' \
+      fathers.tsv
+    cut -f2,4 '~{pedigree}' > mothers.tsv
+    /src/denovo/filtergt by_mother.bcf '~{concordance_vcf}' \
+      '~{mother_genotypes}' \
+      'mother_filtered.bcf' \
+      mothers.tsv
 
     mkdir offspring father mother
 
@@ -1349,27 +1361,33 @@ task MakeDeNovoCalls {
       | xargs mv -t mother
 
     cat > commands.sql <<EOF
-    CREATE TABLE offspring AS
-    SELECT * FROM read_csv(
-        'offspring/*.tsv.gz',
-        delim = '\t',
-        header = false,
-        names = ['chr', 'start', 'end', 'svlen', 'vid', 'sid']
+    CREATE TABLE offspring (
+      chr VARCHAR,
+      start UINTEGER,
+      end UINTEGER,
+      svlen UINTEGER,
+      vid VARCHAR,
+      sid VARCHAR
     );
-    CREATE TABLE father AS
-    SELECT * FROM read_csv(
-        'father/*.tsv.gz',
-        delim = '\t',
-        header = false,
-        names = ['chr', 'start', 'end', 'svlen', 'vid', 'sid']
+    CREATE TABLE father (
+      chr VARCHAR,
+      start UINTEGER,
+      end UINTEGER,
+      svlen UINTEGER,
+      vid VARCHAR,
+      sid VARCHAR
     );
-    CREATE TABLE mother AS
-    SELECT * FROM read_csv(
-        'mother/*.tsv.gz',
-        delim = '\t',
-        header = false,
-        names = ['chr', 'start', 'end', 'svlen', 'vid', 'sid']
+    CREATE TABLE mother (
+      chr VARCHAR,
+      start UINTEGER,
+      end UINTEGER,
+      svlen UINTEGER,
+      vid VARCHAR,
+      sid VARCHAR
     );
+    COPY offspring FROM 'offspring/*.tsv.gz' (FORMAT csv, DELIMITER '\t', HEADER false);
+    COPY father FROM 'father/*.tsv.gz' (FORMAT csv, DELIMITER '\t', HEADER false);
+    COPY mother FROM 'mother/*.tsv.gz' (FORMAT csv, DELIMITER '\t', HEADER false);
     COPY (
         SELECT * FROM offspring
         NATURAL JOIN (
@@ -1378,6 +1396,7 @@ task MakeDeNovoCalls {
         )
     ) TO 'temp.tsv.gz' (FORMAT CSV, DELIMITER '\t');
     EOF
+    duckdb -bail db.duckdb < commands.sql
     mv temp.tsv.gz '~{contig}-denovos.tsv.gz'
   >>>
 }

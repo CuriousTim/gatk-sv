@@ -17,6 +17,7 @@
 
 KHASH_SET_INIT_STR(set)
 KHASH_MAP_INIT_STR(map, khash_t(set)*)
+KHASH_MAP_INIT_STR(ped, const char *)
 
 // pool of truth variant IDs
 khash_t(set) *tvids_pool;
@@ -26,13 +27,15 @@ khash_t(set) *samples_pool;
 khash_t(map) *genotypes;
 // map between eval variants and truth variants
 khash_t(map) *concordance;
+// map between offspring and parent
+khash_t(ped) *parents;
 
 const char *pool_get_string(khash_t(set) *h, char *s);
 khiter_t set_insert(khash_t(set) *h, const char *s);
 
 void usage(FILE *fp)
 {
-	fprintf(fp, "usage: filtergt <inbcf> <concordance_vcf> <genotypes> <outbcf> <filter_flag>\n");
+	fprintf(fp, "usage: filtergt <inbcf> <concordance_vcf> <genotypes> <outbcf> [parents]\n");
 }
 
 /**
@@ -55,7 +58,7 @@ void split_and_insert(char *s, khash_t(set) *pool, khash_t(set) *set,
 }
 
 /**
- * Insert a string into a set, crashing if the operations fails. Return an
+ * Insert a string into a set, crashing if the operation fails. Return an
  * iterator to the inserted element.
  */
 khiter_t set_insert(khash_t(set) *h, const char *s)
@@ -69,7 +72,7 @@ khiter_t set_insert(khash_t(set) *h, const char *s)
 }
 
 /**
- * Insert a string as a key into a map, crashing if the operations fails.
+ * Insert a string as a key into a map, crashing if the operation fails.
  * Return an iterator to the inserted element.
  */
 khiter_t map_insert_key(khash_t(map) *h, const char *s)
@@ -81,6 +84,22 @@ khiter_t map_insert_key(khash_t(map) *h, const char *s)
 
 	return tmp;
 }
+
+/**
+ * Insert a key-value pair of strings into a map, crashing if the operation
+ * fails.  The map takes ownership of both strings.
+ * Return an iterator to the inserted pair.
+ */
+void map_insert_kv(khash_t(ped) *h, const char *k, const char *v)
+{
+	int ret;
+	khiter_t tmp = kh_put(ped, h, k, &ret);
+	if (ret < 0)
+		err("%s", "failed to insert key into map");
+
+	kh_val(h, tmp) = v;
+}
+
 
 /**
  * Get a string from a string pool, copying and inserting the string first if
@@ -260,12 +279,12 @@ bool gt_supported_in_truth(const char *vid, const char *sid)
  *
  * @param hdr                  BCF header.
  * @param rec                  BCF record.
- * @param null_unsupported_gt  If `true`, unsupported genotypes will be set to
- *   null. If `false`, supported genotypes will be set to null. The point of
- *   the `false` case to is nullify genotypes in offspring that have support in
- *   the parents when calling de novo variants.
+ * @param parents  If NULL, samples will be matched against their own truth
+ *   genotypes and those that don't match will be nulled. Otherwise, the pointer
+ *   should point to a hash map between samples and a parent and samples will
+ *   have their genotypes nulled if their parent has a matching genotype.
  */
-void update_genotypes(bcf_hdr_t *hdr, bcf1_t *rec, bool null_unsupported_gt)
+void update_genotypes(bcf_hdr_t *hdr, bcf1_t *rec, khash_t(ped) *parents)
 {
 	const char *vid = rec->d.id;
 	int nsample = bcf_hdr_nsamples(hdr);
@@ -273,6 +292,8 @@ void update_genotypes(bcf_hdr_t *hdr, bcf1_t *rec, bool null_unsupported_gt)
 	int ngt_arr = 0;
 	int ngt = bcf_get_genotypes(hdr, rec, &gt_arr, &ngt_arr);
 	int ploidy = ngt / nsample;
+	// this should only happen with CNVs which are not supported in the de
+	// novo pipeline
 	if (ploidy != 2)
 		err("%s", "sample ploidy is not 2");
 
@@ -284,8 +305,18 @@ void update_genotypes(bcf_hdr_t *hdr, bcf1_t *rec, bool null_unsupported_gt)
 				|| bcf_gt_is_missing(p[1])
 				|| (bcf_gt_allele(p[0]) == 0 && bcf_gt_allele(p[1]) == 0))
 			continue;
-		bool gt_supported = gt_supported_in_truth(vid, hdr->id[BCF_DT_SAMPLE][i].key);
-		if (gt_supported != null_unsupported_gt) {
+		const char *sample = hdr->id[BCF_DT_SAMPLE][i].key;
+		bool set_null;
+		if (parents) {
+			khiter_t p = kh_get(ped, parents, sample); 
+			if (p == kh_end(parents))
+				continue;
+			set_null = gt_supported_in_truth(vid, kh_val(parents, p));
+		} else {
+			set_null = !gt_supported_in_truth(vid, sample);
+		}
+
+		if (set_null) {
 			p[0] = bcf_gt_missing;
 			p[1] = bcf_gt_missing;
 		}
@@ -294,19 +325,35 @@ void update_genotypes(bcf_hdr_t *hdr, bcf1_t *rec, bool null_unsupported_gt)
 	hts_free(gt_arr);
 }
 
-bool is_cnv(const bcf_hdr_t *hdr, bcf1_t *rec)
+khash_t(ped) *load_parents(bcf_hdr_t *hdr, const char *path)
 {
-	bcf_unpack(rec, BCF_UN_INFO);
-	char *svtype = 0;
-	int n = 0;
-	int ret = bcf_get_info_values(hdr, rec, "SVTYPE", (void **)&svtype, &n, BCF_HT_STR);
-	if (ret < 0)
-		err("%s", "record is missing an SVTYPE");
+	FILE *fp = fopen(path, "rt");
+	if (!fp)
+		err("%s", "failed to open pedigree file");
 
-	bool tmp = strcmp(svtype, "CNV") == 0;
-	hts_free(svtype);
+	khash_t(ped) *h = kh_init(ped);
+	if (!h)
+		err("%s", "OOM");
 
-	return tmp;
+	char *line = 0;
+	size_t linecap = 0;
+	ssize_t linelen;
+	while ((linelen = getline(&line, &linecap, fp)) > 0) {
+		char *p = strchr(line, '\t');
+		if (!p)
+			continue;
+		*p = '\0';
+		if (bcf_hdr_id2int(hdr, BCF_DT_SAMPLE, p) == -1)
+			continue;
+
+		char *offspring = strdup(line);
+		char *parent = strdup(p + 1);
+		if (!offspring || !parent)
+			err("%s", "OOM");
+		map_insert_kv(h, offspring, parent);
+	}
+
+	return h;
 }
 
 void free_hashes(void)
@@ -337,16 +384,24 @@ void free_hashes(void)
 			free((void *)kh_key(samples_pool, i));
 	}
 	kh_destroy(set, samples_pool);
+
+	if (parents) {
+		for (khiter_t i = kh_begin(parents); i != kh_end(parents); ++i) {
+			if (kh_exist(parents, i)) {
+				free((void *)kh_val(parents, i));
+				free((void *)kh_key(parents, i));
+			}
+		}
+		kh_destroy(ped, parents);
+	}
 }
 
 int main(int argc, char *argv[])
 {
-	if (argc != 6) {
+	if (argc != 5 && argc != 6) {
 		usage(stderr);
 		return EXIT_FAILURE;
 	}
-
-	bool null_unsupported_gt = argv[5][0] == '1';
 
 	tvids_pool = kh_init(set);
 	samples_pool = kh_init(set);
@@ -365,15 +420,20 @@ int main(int argc, char *argv[])
 		err("%s", "failed to open output BCF");
 
 	bcf_hdr_t *hdr = bcf_hdr_read(infp);
+	if (!hdr)
+		err("%s", "failed to read BCF header");
+	if (argc == 6)
+		parents = load_parents(hdr, argv[5]);
+	else
+		parents = 0;
+
 	if (bcf_hdr_write(outfp, hdr) != 0)
 		err("%s", "failed to write header to output BCF");
 
 	bcf1_t *rec = bcf_init();
 	while (bcf_read(infp, hdr, rec) == 0) {
-		if (is_cnv(hdr, rec))
-			continue;
 		bcf_unpack(rec, BCF_UN_ALL);
-		update_genotypes(hdr, rec, null_unsupported_gt);
+		update_genotypes(hdr, rec, parents);
 		if (bcf_write(outfp, hdr, rec) != 0)
 			err("%s", "failed to write record to output BCF");
 	}
