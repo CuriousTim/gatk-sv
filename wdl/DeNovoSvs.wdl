@@ -1291,15 +1291,15 @@ task FilterGenotypes {
 
     bcftools query --include 'GT == "alt"' \
       --format '[%CHROM\t%POS\t%INFO/END\t%INFO/SVLEN\t%ID\t%INFO/SVTYPE\t%SAMPLE\n]' \
-      self_filtered_bcf \
+      self_filtered.bcf \
       | write_gts offspring
     bcftools query --include 'GT == "alt"' \
       --format '[%CHROM\t%POS\t%INFO/END\t%INFO/SVLEN\t%ID\t%INFO/SVTYPE\t%SAMPLE\n]' \
-      father_filtered_bcf\
+      father_filtered.bcf\
       | write_gts father
     bcftools query --include 'GT == "alt"' \
       --format '[%CHROM\t%POS\t%INFO/END\t%INFO/SVLEN\t%ID\t%INFO/SVTYPE\t%SAMPLE\n]' \
-      mother_filtered_bcf \
+      mother_filtered.bcf \
       | write_gts mother
   >>>
 }
