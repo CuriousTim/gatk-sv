@@ -1273,16 +1273,16 @@ task FilterGenotypes {
     bcftools concat --file-list '~{write_lines(by_mother_batch_bcfs)}' \
       --output by_mother.bcf --output-type b
 
-    /src/denovo/filtergt by_offspring.bcf '~{concordance_vcf}' \
+    filtergt by_offspring.bcf '~{concordance_vcf}' \
       '~{offspring_genotypes}' \
       'self_filtered.bcf'
     cut -f2,3 '~{pedigree}' > fathers.tsv
-    /src/denovo/filtergt by_father.bcf '~{concordance_vcf}' \
+    filtergt by_father.bcf '~{concordance_vcf}' \
       '~{father_genotypes}' \
       'father_filtered.bcf' \
       fathers.tsv
     cut -f2,4 '~{pedigree}' > mothers.tsv
-    /src/denovo/filtergt by_mother.bcf '~{concordance_vcf}' \
+    filtergt by_mother.bcf '~{concordance_vcf}' \
       '~{mother_genotypes}' \
       'mother_filtered.bcf' \
       mothers.tsv
