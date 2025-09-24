@@ -1310,7 +1310,7 @@ task MakeDeNovoCalls {
     Array[File] father_filtered_tsvs
     Array[File] mother_filtered_tsvs
     String contig
-    File denovo_docker
+    String denovo_docker
     RuntimeAttr? runtime_attr_override
   }
 
@@ -1368,24 +1368,24 @@ task MakeDeNovoCalls {
       start UINTEGER,
       end UINTEGER,
       svlen UINTEGER,
-      vid VARCHAR,
-      sid VARCHAR
+      name VARCHAR,
+      "sample" VARCHAR
     );
     CREATE TABLE father (
       chr VARCHAR,
       start UINTEGER,
       end UINTEGER,
       svlen UINTEGER,
-      vid VARCHAR,
-      sid VARCHAR
+      name VARCHAR,
+      "sample" VARCHAR
     );
     CREATE TABLE mother (
       chr VARCHAR,
       start UINTEGER,
       end UINTEGER,
       svlen UINTEGER,
-      vid VARCHAR,
-      sid VARCHAR
+      name VARCHAR,
+      "sample" VARCHAR
     );
     COPY offspring FROM 'offspring/*.tsv.gz' (FORMAT csv, DELIMITER '\t', HEADER false);
     COPY father FROM 'father/*.tsv.gz' (FORMAT csv, DELIMITER '\t', HEADER false);
