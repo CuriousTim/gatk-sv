@@ -1267,11 +1267,11 @@ task FilterGenotypes {
     }
 
     bcftools concat --file-list '~{write_lines(by_offspring_batch_bcfs)}' \
-     --output by_offspring.bcf --output-type b --naive
+     --output by_offspring.bcf --output-type b
     bcftools concat --file-list '~{write_lines(by_father_batch_bcfs)}' \
-      --output by_father.bcf --output-type b --naive
+      --output by_father.bcf --output-type b
     bcftools concat --file-list '~{write_lines(by_mother_batch_bcfs)}' \
-      --output by_mother.bcf --output-type b --naive
+      --output by_mother.bcf --output-type b
 
     /src/denovo/filtergt by_offspring.bcf '~{concordance_vcf}' \
       '~{offspring_genotypes}' \
