@@ -1364,27 +1364,27 @@ task MakeDeNovoCalls {
 
     cat > commands.sql <<EOF
     CREATE TABLE offspring (
-      chr VARCHAR,
-      start UINTEGER,
-      end UINTEGER,
-      svlen UINTEGER,
-      name VARCHAR,
+      "chr" VARCHAR,
+      "start" UINTEGER,
+      "end" UINTEGER,
+      "svlen" UINTEGER,
+      "name" VARCHAR,
       "sample" VARCHAR
     );
     CREATE TABLE father (
-      chr VARCHAR,
-      start UINTEGER,
-      end UINTEGER,
-      svlen UINTEGER,
-      name VARCHAR,
+      "chr" VARCHAR,
+      "start" UINTEGER,
+      "end" UINTEGER,
+      "svlen" UINTEGER,
+      "name" VARCHAR,
       "sample" VARCHAR
     );
     CREATE TABLE mother (
-      chr VARCHAR,
-      start UINTEGER,
-      end UINTEGER,
-      svlen UINTEGER,
-      name VARCHAR,
+      "chr" VARCHAR,
+      "start" UINTEGER,
+      "end" UINTEGER,
+      "svlen" UINTEGER,
+      "name" VARCHAR,
       "sample" VARCHAR
     );
     COPY offspring FROM 'offspring/*.tsv.gz' (FORMAT csv, DELIMITER '\t', HEADER false);
