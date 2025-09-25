@@ -66,10 +66,11 @@ workflow DeNovoSvs {
     RuntimeAttr? runtime_override_sv_concordance
     RuntimeAttr? runtime_override_filter_genotypes
     RuntimeAttr? runtime_override_make_denovo_calls
+    RuntimeAttr? runtime_override_merge_denovo_calls
   }
 
   output {
-    Array[File] denovo_tsvs = MakeDeNovoCalls.denovos_tsv
+    File merged_denovos = MergeDeNovoCalls.merged_denovos
   }
 
   call MakeManifests {
@@ -264,6 +265,13 @@ workflow DeNovoSvs {
         denovo_docker = denovo_docker,
         runtime_attr_override = runtime_override_make_denovo_calls
     }
+  }
+
+  call MergeDeNovoCalls {
+    input:
+      denovos = MakeDeNovoCalls.denovos_tsv,
+      linux_docker = linux_docker,
+      runtime_attr_override = runtime_override_merge_denovo_calls
   }
 }
 
