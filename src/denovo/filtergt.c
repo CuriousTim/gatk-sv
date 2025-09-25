@@ -104,7 +104,7 @@ void map_insert_kv(khash_t(ped) *h, const char *k, const char *v)
 /**
  * Get a string from a string pool, copying and inserting the string first if
  * it doesn't exist.
- */ 
+ */
 const char *pool_get_string(khash_t(set) *h, char *s)
 {
 	khiter_t i = kh_get(set, h, s);
@@ -308,10 +308,10 @@ void update_genotypes(bcf_hdr_t *hdr, bcf1_t *rec, khash_t(ped) *parents)
 		const char *sample = hdr->id[BCF_DT_SAMPLE][i].key;
 		bool set_null;
 		if (parents) {
-			khiter_t p = kh_get(ped, parents, sample); 
-			if (p == kh_end(parents))
+			khiter_t q = kh_get(ped, parents, sample);
+			if (q == kh_end(parents))
 				continue;
-			set_null = gt_supported_in_truth(vid, kh_val(parents, p));
+			set_null = gt_supported_in_truth(vid, kh_val(parents, q));
 		} else {
 			set_null = !gt_supported_in_truth(vid, sample);
 		}
@@ -339,11 +339,13 @@ khash_t(ped) *load_parents(bcf_hdr_t *hdr, const char *path)
 	size_t linecap = 0;
 	ssize_t linelen;
 	while ((linelen = getline(&line, &linecap, fp)) > 0) {
+		if (*(line + linelen - 1) == '\n')
+			*(line + linelen - 1) = '\0';
 		char *p = strchr(line, '\t');
 		if (!p)
 			continue;
 		*p = '\0';
-		if (bcf_hdr_id2int(hdr, BCF_DT_SAMPLE, p) == -1)
+		if (bcf_hdr_id2int(hdr, BCF_DT_SAMPLE, line) == -1)
 			continue;
 
 		char *offspring = strdup(line);
