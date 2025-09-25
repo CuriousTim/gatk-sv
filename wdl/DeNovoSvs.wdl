@@ -1369,6 +1369,7 @@ task MakeDeNovoCalls {
       "end" UINTEGER,
       "svlen" UINTEGER,
       "name" VARCHAR,
+      "svtype" VARCHAR,
       "sample" VARCHAR
     );
     CREATE TABLE father (
@@ -1377,6 +1378,7 @@ task MakeDeNovoCalls {
       "end" UINTEGER,
       "svlen" UINTEGER,
       "name" VARCHAR,
+      "svtype" VARCHAR,
       "sample" VARCHAR
     );
     CREATE TABLE mother (
@@ -1385,6 +1387,7 @@ task MakeDeNovoCalls {
       "end" UINTEGER,
       "svlen" UINTEGER,
       "name" VARCHAR,
+      "svtype" VARCHAR,
       "sample" VARCHAR
     );
     COPY offspring FROM 'offspring/*.tsv.gz' (FORMAT csv, DELIMITER '\t', HEADER false);
