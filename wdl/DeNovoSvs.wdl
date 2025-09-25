@@ -1324,7 +1324,7 @@ task MakeDeNovoCalls {
   }
 
   output {
-    File denovos_tsv = '~{contig}-denovos.tsv.gz'
+    File denovos_tsv = "${contig}-denovos.tsv.gz"
   }
 
   Float disk_size = size(offspring_filtered_tsvs, "GB")
@@ -1403,5 +1403,55 @@ task MakeDeNovoCalls {
     EOF
     duckdb -bail db.duckdb < commands.sql
     mv temp.tsv.gz '~{contig}-denovos.tsv.gz'
+  >>>
+}
+
+task MergeDeNovoCalls {
+  input {
+    Array[File]+ denovos
+    String linux_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  parameter_meta {
+    denovos: "TSVs with de novo calls."
+    linux_docker: "The corresponding Docker image from GATK-SV."
+    runtime_attr_override: "Runtime attribute overrides."
+  }
+
+  output {
+    File merged_denovos  = "denovo_svs.tsv.gz"
+  }
+
+  Float disk_size = size(denovos, "GB")
+
+  RuntimeAttr default_attr = object {
+    mem_gb: 4,
+    cpu_cores: 1,
+    disk_gb: ceil(disk_size * 2) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: "${select_first([runtime_attr.mem_gb, default_attr.mem_gb])} GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk ${select_first([runtime_attr.disk_gb, default_attr.disk_gb])} SSD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: linux_docker
+  }
+
+  command <<<
+    set -euxo pipefail
+
+    manifest='~{write_lines(denovos)}'
+    cp "$(head -n 1 "${manifest}")" 'denovo_svs.tsv.gz'
+    awk 'NR>1' "${manifest}" \
+      | while read -r f; do gzip -cd "${f}" | awk 'NR>1'; done \
+      | gzip -c >> 'denovo_svs.tsv.gz'
   >>>
 }
