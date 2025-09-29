@@ -872,8 +872,8 @@ task FilterOffspringSites {
       while read -r f; do cat2 "${f}"; done < "${er_paths}" \
         | LC_ALL=C sort -k1,1 -k2,2n > er_merged.bed
 
-        bedtools coverage -a sites.bed -b er_merged.bed -sorted \
-          | awk -F'\t' '$8 >= ovp {print $4}' ovp=~{exclude_regions_ovp} >> exclude_regions_fail
+      bedtools coverage -a sites.bed -b er_merged.bed -sorted \
+        | awk -F'\t' '$8 >= ovp {print $4}' ovp=~{exclude_regions_ovp} >> exclude_regions_fail
     fi
 
     bedtools coverage -a sites.bed -b '~{gd_regions}' \
@@ -883,7 +883,7 @@ task FilterOffspringSites {
     cat af_fail bothsides_fail depth_only_fail exclude_regions_fail | sort -u > blacklist
     comm -13 whitelist blacklist > blacklist_clean
 
-    bcftools view --exclude 'ID = "@blacklist_clean"' --output-type u \
+    bcftools view --exclude 'ID = @blacklist_clean' --output-type u \
       --output '~{filtered_bcf_name}' '~{bcf}'
   >>>
 }
