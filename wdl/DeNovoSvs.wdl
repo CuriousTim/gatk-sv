@@ -21,6 +21,7 @@ workflow DeNovoSvs {
     Float exclude_regions_ovp = 0.5
     File gd_regions
     Float gd_regions_ovp = 0.5
+    Float max_gd_af = 0.1
 
     # Either a single VCF or an array of VCFs with each one containing a single
     # contig. In the case of a single VCF, it is expected that all the contigs
@@ -151,6 +152,7 @@ workflow DeNovoSvs {
         exclude_regions_ovp = exclude_regions_ovp,
         gd_regions = gd_regions,
         gd_regions_ovp = gd_regions_ovp,
+        max_gd_af = max_gd_af,
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_filter_offspring_sites
     }
@@ -779,6 +781,7 @@ task FilterOffspringSites {
     Float exclude_regions_ovp
     File gd_regions
     Float gd_regions_ovp
+    Float max_gd_af
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
@@ -792,7 +795,8 @@ task FilterOffspringSites {
     exclude_regions: "BED3 files of genomic regions to exclude. The files are concatenated before testing for coverage."
     exclude_regions_ovp: "Fraction of SV that must be covered by exclude regions to be dropped."
     gd_regions: "BED3 files of genomic disorder regions."
-    gd_regions_ovp: "Fraction of SV that must be covered by genomic disorder regions to be dropped."
+    gd_regions_ovp: "Fraction of SV that must be covered by genomic disorder regions to bypass site filters."
+    max_gd_af: "Maximum allele frequency of a site to be considered for genomic disorder regions overlap."
     sv_base_mini_docker: "The corresponding Docker image from GATK-SV."
     runtime_attr_override: "Runtime attribute overrides."
   }
@@ -876,7 +880,9 @@ task FilterOffspringSites {
         | awk -F'\t' '$8 >= ovp {print $4}' ovp=~{exclude_regions_ovp} >> exclude_regions_fail
     fi
 
-    bedtools coverage -a sites.bed -b '~{gd_regions}' \
+    bcftools query --include 'INFO/AF = "." || INFO/AF <= ~{max_gd_af}' \
+      --format '%CHROM\t%POS0\t%END\t%ID\n' sites_only.bcf > gd_candidates.bed
+    bedtools coverage -a gd_candidates.bed -b '~{gd_regions}' \
       | awk -F'\t' '$8 >= ~{gd_regions_ovp} {print $4}' > gd_pass
 
     sort -u gd_pass > whitelist
