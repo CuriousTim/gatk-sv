@@ -355,6 +355,8 @@ khash_t(ped) *load_parents(bcf_hdr_t *hdr, const char *path)
 		map_insert_kv(h, offspring, parent);
 	}
 
+	fclose(fp);
+
 	return h;
 }
 
