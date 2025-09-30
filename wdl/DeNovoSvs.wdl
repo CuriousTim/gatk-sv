@@ -264,7 +264,7 @@ workflow DeNovoSvs {
         father_filtered_tsvs = father_gt_filtered_tsvs[i],
         mother_filtered_tsvs = mother_gt_filtered_tsvs[i],
         contig = kept_contigs[i],
-        denovo_docker = denovo_docker,
+        linux_docker = linux_docker,
         runtime_attr_override = runtime_override_make_denovo_calls
     }
   }
@@ -1324,7 +1324,7 @@ task MakeDeNovoCalls {
     Array[File] father_filtered_tsvs
     Array[File] mother_filtered_tsvs
     String contig
-    String denovo_docker
+    String linux_docker
     RuntimeAttr? runtime_attr_override
   }
 
@@ -1333,7 +1333,7 @@ task MakeDeNovoCalls {
     father_filtered_tsvs: "Offspring genotypes filtered against father."
     mother_filtered_tsvs: "Offspring genotypes filtered against mother."
     contig: "Contig being processed."
-    denovo_docker: "The corresponding Docker image from GATK-SV."
+    linux_docker: "The corresponding Docker image from GATK-SV."
     runtime_attr_override: "Runtime attribute overrides."
   }
 
@@ -1358,65 +1358,31 @@ task MakeDeNovoCalls {
   runtime {
     memory: "${select_first([runtime_attr.mem_gb, default_attr.mem_gb])} GB"
     cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-    disks: "local-disk ${select_first([runtime_attr.disk_gb, default_attr.disk_gb])} SSD"
+    disks: "local-disk ${select_first([runtime_attr.disk_gb, default_attr.disk_gb])} HDD"
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
     preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
     maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: denovo_docker
+    docker: linux_docker
   }
 
   command <<<
     set -euxo pipefail
 
-    mkdir offspring father mother
+    mkdir tmp
+    mkdir tmp/offspring tmp/father tmp/mother
     cat '~{write_lines(offspring_filtered_tsvs)}' \
-      | xargs mv -t offspring
+      | xargs mv -t tmp/offspring
     cat '~{write_lines(father_filtered_tsvs)}' \
-      | xargs mv -t father
+      | xargs mv -t tmp/father
     cat '~{write_lines(mother_filtered_tsvs)}' \
-      | xargs mv -t mother
-
-    cat > commands.sql <<EOF
-    CREATE TABLE offspring (
-      "chr" VARCHAR,
-      "start" UINTEGER,
-      "end" UINTEGER,
-      "svlen" UINTEGER,
-      "name" VARCHAR,
-      "svtype" VARCHAR,
-      "sample" VARCHAR
-    );
-    CREATE TABLE father (
-      "chr" VARCHAR,
-      "start" UINTEGER,
-      "end" UINTEGER,
-      "svlen" UINTEGER,
-      "name" VARCHAR,
-      "svtype" VARCHAR,
-      "sample" VARCHAR
-    );
-    CREATE TABLE mother (
-      "chr" VARCHAR,
-      "start" UINTEGER,
-      "end" UINTEGER,
-      "svlen" UINTEGER,
-      "name" VARCHAR,
-      "svtype" VARCHAR,
-      "sample" VARCHAR
-    );
-    COPY offspring FROM 'offspring/*.tsv.gz' (FORMAT csv, DELIMITER '\t', HEADER false);
-    COPY father FROM 'father/*.tsv.gz' (FORMAT csv, DELIMITER '\t', HEADER false);
-    COPY mother FROM 'mother/*.tsv.gz' (FORMAT csv, DELIMITER '\t', HEADER false);
-    COPY (
-        SELECT * FROM offspring
-        NATURAL JOIN (
-            SELECT * FROM father
-            NATURAL JOIN mother
-        )
-    ) TO 'temp.tsv.gz' (FORMAT CSV, DELIMITER '\t');
-    EOF
-    duckdb -bail db.duckdb < commands.sql
-    mv temp.tsv.gz '~{contig}-denovos.tsv.gz'
+      | xargs mv -t tmp/mother
+    printf 'chr\tstart\tend\tsvlen\tname\tsvtype\tsample\n' \
+      | gzip -c > '~{contig}-denovos.tsv.gz'
+    find tmp -type f '!' -empty -exec gzip -cd '{}' \; \
+      | LC_ALL=C sort \
+      | uniq -c \
+      | awk 'BEGIN{OFS="\t"} $1==3{sub(/^[0-9]+ /, ""); print}' \
+      | gzip -c >> '~{contig}-denovos.tsv.gz'
   >>>
 }
 
@@ -1452,7 +1418,7 @@ task MergeDeNovoCalls {
   runtime {
     memory: "${select_first([runtime_attr.mem_gb, default_attr.mem_gb])} GB"
     cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-    disks: "local-disk ${select_first([runtime_attr.disk_gb, default_attr.disk_gb])} SSD"
+    disks: "local-disk ${select_first([runtime_attr.disk_gb, default_attr.disk_gb])} HDD"
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
     preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
     maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
