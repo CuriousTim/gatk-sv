@@ -1381,7 +1381,7 @@ task MakeDeNovoCalls {
     find tmp -type f '!' -empty -exec gzip -cd '{}' \; \
       | LC_ALL=C sort \
       | uniq -c \
-      | awk 'BEGIN{OFS="\t"} $1==3{sub(/^[0-9]+ /, ""); print}' \
+      | awk '$1==3{sub(/^ *[0-9]+ /, ""); print}' \
       | gzip -c >> '~{contig}-denovos.tsv.gz'
   >>>
 }
