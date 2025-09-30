@@ -880,7 +880,7 @@ task FilterOffspringSites {
         | awk -F'\t' '$8 >= ovp {print $4}' ovp=~{exclude_regions_ovp} >> exclude_regions_fail
     fi
 
-    bcftools query --include 'INFO/AF = "." || INFO/AF <= ~{max_gd_af}' \
+    bcftools query --include '(INFO/AF = "." || INFO/AF <= ~{max_gd_af}) && (INFO/SVTYPE = "DEL" || INFO/SVTYPE = "DUP")' \
       --format '%CHROM\t%POS0\t%END\t%ID\n' sites_only.bcf > gd_candidates.bed
     bedtools coverage -a gd_candidates.bed -b '~{gd_regions}' \
       | awk -F'\t' '$8 >= ~{gd_regions_ovp} {print $4}' > gd_pass
