@@ -246,7 +246,8 @@ workflow DeNovoSvs {
         offspring_genotypes = MergeClusteredBatchVcfs.offspring_genotypes,
         father_genotypes = MergeClusteredBatchVcfs.father_genotypes,
         mother_genotypes = MergeClusteredBatchVcfs.mother_genotypes,
-        concordance_vcf = SVConcordance.concordance_vcf,
+        strict_concordance_vcf = SVConcordance.strict_concordance_vcf,
+        lenient_concordance_vcf = SVConcordance.lenient_concordance_vcf,
         pedigree = SubsetSamples.ped_subset,
         denovo_docker = denovo_docker,
         runtime_attr_override = runtime_override_filter_genotypes
@@ -1158,7 +1159,8 @@ task SVConcordance {
   }
 
   output {
-    File concordance_vcf = concordance_vcf_name
+    File strict_concordance_vcf = "${strict_concordance_name}"
+    File lenient_concordance_vcf = "${lenient_concordance_name}"
   }
 
   RuntimeAttr default_attr = object {
@@ -1183,7 +1185,8 @@ task SVConcordance {
     docker: svconcordance_keep_all_docker
   }
 
-  String concordance_vcf_name = "${concordance_prefix}.vcf.gz"
+  String strict_concordance_name = "${concordance_prefix}-strict.vcf.gz"
+  String lenient_concordance_name = "${concordance_prefix}-lenient.vcf.gz"
 
   command <<<
     set -euxo pipefail
@@ -1193,7 +1196,31 @@ task SVConcordance {
       --sequence-dictionary '~{reference_dict}' \
       --eval '~{eval_vcf}' \
       --truth '~{truth_vcf}'\
-      --output '~{concordance_vcf_name}'
+      --output '~{strict_concordance_name}' \
+      --depth-interval-overlap 0.8 \
+      --depth-size-similarity 0 \
+      --depth-breakend-window 1000000000 \
+      --mixed-interval-overlap 0.8 \
+      --mixed-size-similarity 0 \
+      --mixed-breakend-window 500 \
+      --pesr-interval-overlap 0 \
+      --pesr-size-similarity 0 \
+      --pesr-breakend-window 300 \
+    gatk --java-options '-Xmx~{jvm_mem}M' SVConcordance \
+      --keep-all \
+      --sequence-dictionary '~{reference_dict}' \
+      --eval '~{eval_vcf}' \
+      --truth '~{truth_vcf}'\
+      --output '~{lenient_concordance_name}' \
+      --depth-interval-overlap 0.5 \
+      --depth-size-similarity 0 \
+      --depth-breakend-window 1000000000 \
+      --mixed-interval-overlap 0.5 \
+      --mixed-size-similarity 0 \
+      --mixed-breakend-window 1000 \
+      --pesr-interval-overlap 0 \
+      --pesr-size-similarity 0 \
+      --pesr-breakend-window 500 \
   >>>
 }
 
@@ -1208,7 +1235,8 @@ task FilterGenotypes {
     File offspring_genotypes
     File father_genotypes
     File mother_genotypes
-    File concordance_vcf
+    File strict_concordance_vcf
+    File lenient_concordance_vcf
     File pedigree
     String denovo_docker
     RuntimeAttr? runtime_attr_override
@@ -1223,7 +1251,8 @@ task FilterGenotypes {
     offspring_genotypes: "Offspring genotypes from the MergeClusteredBatchVcfs."
     father_genotypes: "Father genotypes from the MergeClusteredBatchVcfs."
     mother_genotypes: "Mother genotypes from the MergeClusteredBatchVcfs."
-    concordance_vcf: "SVConcordance VCF between offspring sites and ClusterBatch sites."
+    strict_concordance_vcf: "SVConcordance VCF between offspring sites and ClusterBatch sites with strict parameters."
+    lenient_concordance_vcf: "SVConcordance VCF between offspring sites and ClusterBatch sites with lenient parameters."
     pedigree: "Cohort pedigree."
     denovo_docker: "The corresponding Docker image from GATK-SV."
     runtime_attr_override: "Runtime attribute overrides."
@@ -1241,7 +1270,8 @@ task FilterGenotypes {
     + size(offspring_genotypes, "GB")
     + size(father_genotypes, "GB")
     + size(mother_genotypes, "GB")
-    + size(concordance_vcf, "GB")
+    + size(strict_concordance_vcf, "GB")
+    + size(lenient_concordance_vcf, "GB")
 
   RuntimeAttr default_attr = object {
     mem_gb: 4,
@@ -1287,16 +1317,16 @@ task FilterGenotypes {
     bcftools concat --file-list '~{write_lines(by_mother_batch_bcfs)}' \
       --output by_mother.bcf --output-type b
 
-    filtergt by_offspring.bcf '~{concordance_vcf}' \
+    filtergt by_offspring.bcf '~{strict_concordance_vcf}' \
       '~{offspring_genotypes}' \
       'self_filtered.bcf'
     cut -f2,3 '~{pedigree}' > fathers.tsv
-    filtergt by_father.bcf '~{concordance_vcf}' \
+    filtergt by_father.bcf '~{lenient_concordance_vcf}' \
       '~{father_genotypes}' \
       'father_filtered.bcf' \
       fathers.tsv
     cut -f2,4 '~{pedigree}' > mothers.tsv
-    filtergt by_mother.bcf '~{concordance_vcf}' \
+    filtergt by_mother.bcf '~{lenient_concordance_vcf}' \
       '~{mother_genotypes}' \
       'mother_filtered.bcf' \
       mothers.tsv
