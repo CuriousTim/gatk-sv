@@ -1205,7 +1205,7 @@ task SVConcordance {
       --mixed-breakend-window 500 \
       --pesr-interval-overlap 0 \
       --pesr-size-similarity 0 \
-      --pesr-breakend-window 300 \
+      --pesr-breakend-window 300
     gatk --java-options '-Xmx~{jvm_mem}M' SVConcordance \
       --keep-all \
       --sequence-dictionary '~{reference_dict}' \
@@ -1220,7 +1220,7 @@ task SVConcordance {
       --mixed-breakend-window 1000 \
       --pesr-interval-overlap 0 \
       --pesr-size-similarity 0 \
-      --pesr-breakend-window 500 \
+      --pesr-breakend-window 500
   >>>
 }
 
