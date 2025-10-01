@@ -1191,36 +1191,50 @@ task SVConcordance {
   command <<<
     set -euxo pipefail
 
+    printf 'NAME\tSVTYPE\tMIN_SIZE\tMAX_SIZE\tTRACKS\n' > stratify.tsv
+    printf 'DEL_small\tDEL\t-1\t5000\tNULL\n' >> stratify.tsv
+    printf 'DUP_small\tDUP\t-1\t5000\tNULL\n' >> stratify.tsv
+    printf 'DEL_large\tDEL\t5000\t-1\tNULL\n' >> stratify.tsv
+    printf 'DUP_large\tDUP\t5000\t-1\tNULL\n' >> stratify.tsv
+    printf 'INV_small\tINV\t-1\t5000\tNULL\n' >> stratify.tsv
+    printf 'INV_large\tINV\t5000\t-1\tNULL\n' >> stratify.tsv
+    printf 'INS\tINS\t-1\t-1\tNULL\n' >> stratify.tsv
+
+    printf 'NAME\tRECIPROCAL_OVERLAP\tSIZE_SIMILARITY\tBREAKEND_WINDOW\tSAMPLE_OVERLAP\n' > cluster_strict.tsv
+    printf 'DEL_small\t0.1\t0.5\t300\t0\n' >> cluster_strict.tsv
+    printf 'DUP_small\t0.1\t0.5\t300\t0\n' >> cluster_strict.tsv
+    printf 'DEL_large\t0.8\t0\t100000000\t0\n' >> cluster_strict.tsv
+    printf 'DUP_large\t0.8\t0\t100000000\t0\n' >> cluster_strict.tsv
+    printf 'INV_small\t0.1\t0.5\t300\t0\n' >> cluster_strict.tsv
+    printf 'INV_large\t0.8\t0\t100000000\t0\n' >> cluster_strict.tsv
+    printf 'INS\t0\t0.5\t300\t0\n' >> cluster_strict.tsv
+
+    printf 'NAME\tRECIPROCAL_OVERLAP\tSIZE_SIMILARITY\tBREAKEND_WINDOW\tSAMPLE_OVERLAP\n' > cluster_lenient.tsv
+    printf 'DEL_small\t0.1\t0\t500\t0\n' >> cluster_lenient.tsv
+    printf 'DUP_small\t0.1\t0\t500\t0\n' >> cluster_lenient.tsv
+    printf 'DEL_large\t0.5\t0\t100000000\t0\n' >> cluster_lenient.tsv
+    printf 'DUP_large\t0.5\t0\t100000000\t0\n' >> cluster_lenient.tsv
+    printf 'INV_small\t0.1\t0\t500\t0\n' >> cluster_lenient.tsv
+    printf 'INV_large\t0.5\t0\t100000000\t0\n' >> cluster_lenient.tsv
+    printf 'INS\t0\t0\t500\t0\n' >> cluster_lenient.tsv
+
     gatk --java-options '-Xmx~{jvm_mem}M' SVConcordance \
       --keep-all \
       --sequence-dictionary '~{reference_dict}' \
       --eval '~{eval_vcf}' \
       --truth '~{truth_vcf}'\
       --output '~{strict_concordance_name}' \
-      --depth-interval-overlap 0.8 \
-      --depth-size-similarity 0 \
-      --depth-breakend-window 1000000000 \
-      --mixed-interval-overlap 0.8 \
-      --mixed-size-similarity 0 \
-      --mixed-breakend-window 500 \
-      --pesr-interval-overlap 0 \
-      --pesr-size-similarity 0 \
-      --pesr-breakend-window 300
+      --stratify-config stratify.tsv \
+      --clustering-config cluster_strict.tsv
+
     gatk --java-options '-Xmx~{jvm_mem}M' SVConcordance \
       --keep-all \
       --sequence-dictionary '~{reference_dict}' \
       --eval '~{eval_vcf}' \
       --truth '~{truth_vcf}'\
       --output '~{lenient_concordance_name}' \
-      --depth-interval-overlap 0.5 \
-      --depth-size-similarity 0 \
-      --depth-breakend-window 1000000000 \
-      --mixed-interval-overlap 0.5 \
-      --mixed-size-similarity 0 \
-      --mixed-breakend-window 1000 \
-      --pesr-interval-overlap 0 \
-      --pesr-size-similarity 0 \
-      --pesr-breakend-window 500
+      --stratify-config stratify.tsv \
+      --clustering-config cluster_lenient.tsv
   >>>
 }
 
