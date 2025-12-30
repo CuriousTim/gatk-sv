@@ -768,7 +768,8 @@ task RemoveUncalledSvtypes {
 #       `exclude_regions_ovp` fraction of the SV
 #    c. small CNVs that are SR-only and don't have BOTHSIDES_SUPPORT
 #    d. are depth-only DUPs and are smaller than the depth-only size threshold
-#    e. are not covered by genomic disorder regions by a minimum of
+#    e. have a HIGH_SR_BACKGROUND flag
+#    f. are not covered by genomic disorder regions by a minimum of
 #       `gd_regions_ovp` fraction of the SV (any site meeting this criteria will be
 #       kept, even if it would otherwise excluded by the previous criteria)
 task FilterOffspringSites {
@@ -869,6 +870,8 @@ task FilterOffspringSites {
       --include 'SVTYPE = "DUP" && ALGORITHMS = "depth" && SVLEN < ~{depth_only_size}' \
       --format '%ID\n' \
       sites_only.bcf > depth_only_fail
+    bcftools query --include 'INFO/HIGH_SR_BACKGROUND = 1' --format '%ID\n' \
+      sites_only.bcf > high_sr_fail
 
     bcftools query --format '%CHROM\t%POS0\t%END\t%ID\n' sites_only.bcf > sites.bed
     : > exclude_regions_fail
@@ -887,7 +890,7 @@ task FilterOffspringSites {
       | awk -F'\t' '$8 >= ~{gd_regions_ovp} {print $4}' > gd_pass
 
     sort -u gd_pass > whitelist
-    cat af_fail bothsides_fail depth_only_fail exclude_regions_fail | sort -u > blacklist
+    cat af_fail bothsides_fail depth_only_fail high_sr_fail exclude_regions_fail | sort -u > blacklist
     comm -13 whitelist blacklist > blacklist_clean
 
     bcftools view --exclude 'ID = @blacklist_clean' --output-type u \
