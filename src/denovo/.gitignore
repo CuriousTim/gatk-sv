@@ -1,0 +1,4 @@
+.cache/
+*.dSYM/
+compile_commands.json
+filtergt
