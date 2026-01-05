@@ -179,6 +179,8 @@ workflow DeNovoSvs {
   call MergeOffspringSites {
     input:
       bcfs = sites_only_matched_bcf,
+      bcf_contigs = kept_contigs,
+      contigs_order = contigs,
       sv_base_mini_docker = sv_base_mini_docker,
       runtime_attr_override = runtime_override_merge_offspring_sites
   }
@@ -990,12 +992,16 @@ task MatchBcfToContig {
 task MergeOffspringSites {
   input {
     Array[File] bcfs
+    Array[File] bcf_contigs
+    Array[String] contigs_order
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
 
   parameter_meta {
     bcfs: "BCFs to merge. Each file should be a sites-only BCF with a single contig."
+    bcf_contigs: "Contig in each BCF."
+    contigs_order: "Order of contigs to merge the BCFs."
     sv_base_mini_docker: "The corresponding Docker image from GATK-SV."
     runtime_attr_override: "Runtime attribute overrides."
   }
@@ -1030,7 +1036,11 @@ task MergeOffspringSites {
   command <<<
     set -euxo pipefail
 
-    bcftools concat --file-list '~{write_lines(bcfs)}' --output '~{vcf_name}' \
+    paste '~{write_lines(bcf_contigs)}' '~{write_lines(bcfs)}' > bcfs.tsv
+    awk -F'\t' 'NR==FNR{a[$1]=$2} NR>FNR && ($1 in a){print a[$1]}' \
+      bcfs.tsv '~{write_lines(contigs_order)}' > merge_list
+
+    bcftools concat --file-list merge_list --output '~{vcf_name}' \
       --output-type z
     bcftools index --tbi '~{vcf_name}'
   >>>
