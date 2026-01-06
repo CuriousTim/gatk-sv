@@ -992,7 +992,7 @@ task MatchBcfToContig {
 task MergeOffspringSites {
   input {
     Array[File] bcfs
-    Array[File] bcf_contigs
+    Array[String] bcf_contigs
     Array[String] contigs_order
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
