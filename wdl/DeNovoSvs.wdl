@@ -19,9 +19,6 @@ workflow DeNovoSvs {
     Int depth_only_size = 5000
     Array[File]? exclude_regions
     Float exclude_regions_ovp = 0.5
-    File gd_regions
-    Float gd_regions_ovp = 0.5
-    Float max_gd_af = 0.1
 
     # Either a single VCF or an array of VCFs with each one containing a single
     # contig. In the case of a single VCF, it is expected that all the contigs
@@ -150,9 +147,6 @@ workflow DeNovoSvs {
         depth_only_size = depth_only_size,
         exclude_regions = exclude_regions,
         exclude_regions_ovp = exclude_regions_ovp,
-        gd_regions = gd_regions,
-        gd_regions_ovp = gd_regions_ovp,
-        max_gd_af = max_gd_af,
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_filter_offspring_sites
     }
@@ -771,9 +765,6 @@ task RemoveUncalledSvtypes {
 #    c. small CNVs that are SR-only and don't have BOTHSIDES_SUPPORT
 #    d. are depth-only DUPs and are smaller than the depth-only size threshold
 #    e. have a HIGH_SR_BACKGROUND flag
-#    f. are not covered by genomic disorder regions by a minimum of
-#       `gd_regions_ovp` fraction of the SV (any site meeting this criteria will be
-#       kept, even if it would otherwise excluded by the previous criteria)
 task FilterOffspringSites {
   input {
     File bcf
@@ -783,9 +774,6 @@ task FilterOffspringSites {
     Int depth_only_size
     Array[File]? exclude_regions
     Float exclude_regions_ovp
-    File gd_regions
-    Float gd_regions_ovp
-    Float max_gd_af
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
@@ -798,9 +786,6 @@ task FilterOffspringSites {
     depth_only_size: "Minimum size, in bases, of a DUP that is allowed to a depth-only call."
     exclude_regions: "BED3 files of genomic regions to exclude. The files are concatenated before testing for coverage."
     exclude_regions_ovp: "Fraction of SV that must be covered by exclude regions to be dropped."
-    gd_regions: "BED3 files of genomic disorder regions."
-    gd_regions_ovp: "Fraction of SV that must be covered by genomic disorder regions to bypass site filters."
-    max_gd_af: "Maximum allele frequency of a site to be considered for genomic disorder regions overlap."
     sv_base_mini_docker: "The corresponding Docker image from GATK-SV."
     runtime_attr_override: "Runtime attribute overrides."
   }
@@ -810,7 +795,7 @@ task FilterOffspringSites {
   }
 
   Float bcf_size = size(bcf, "GB")
-  Float other_size = size(gd_regions, "GB") + (if defined(exclude_regions) then size(select_first([exclude_regions]), "GB") else 0)
+  Float other_size = (if defined(exclude_regions) then size(select_first([exclude_regions]), "GB") else 0)
 
   RuntimeAttr default_attr = object {
     mem_gb: 4,
@@ -886,16 +871,9 @@ task FilterOffspringSites {
         | awk -F'\t' '$8 >= ovp {print $4}' ovp=~{exclude_regions_ovp} >> exclude_regions_fail
     fi
 
-    bcftools query --include '(INFO/AF = "." || INFO/AF <= ~{max_gd_af}) && (INFO/SVTYPE = "DEL" || INFO/SVTYPE = "DUP")' \
-      --format '%CHROM\t%POS0\t%END\t%ID\n' sites_only.bcf > gd_candidates.bed
-    bedtools coverage -a gd_candidates.bed -b '~{gd_regions}' \
-      | awk -F'\t' '$8 >= ~{gd_regions_ovp} {print $4}' > gd_pass
-
-    sort -u gd_pass > whitelist
     cat af_fail bothsides_fail depth_only_fail high_sr_fail exclude_regions_fail | sort -u > blacklist
-    comm -13 whitelist blacklist > blacklist_clean
 
-    bcftools view --exclude 'ID = @blacklist_clean' --output-type u \
+    bcftools view --exclude 'ID = @blacklist' --output-type u \
       --output '~{filtered_bcf_name}' '~{bcf}'
   >>>
 }
