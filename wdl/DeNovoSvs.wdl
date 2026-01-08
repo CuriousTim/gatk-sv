@@ -838,14 +838,22 @@ task FilterOffspringSites {
 
     bcftools head sites_only.bcf | grep '^##' > headers.txt
 
-    # Older GATK-SV VCFs have BOTHSIDES_SUPPORT in the FILTER field while
-    # newer ones have it in the INFO field
+    # Older GATK-SV VCFs have BOTHSIDES_SUPPORT and HIGH_SR_BACKGROUND in the
+    # FILTER field while newer ones have it in the INFO field
     if grep -qF '##INFO=<ID=BOTHSIDES_SUPPORT,' headers.txt; then
       bothsides_filter='INFO/BOTHSIDES_SUPPORT = 1'
     elif grep -qF '##FILTER=<ID=BOTHSIDES_SUPPORT,' headers.txt; then
       bothsides_filter='FILTER ~ "BOTHSIDES_SUPPORT"'
     else
       printf 'BOTHSIDES_SUPPORT not found in BCF\n' >&2
+      exit 1
+    fi
+    if grep -qF '##INFO=<ID=HIGH_SR_BACKGROUND,' headers.txt; then
+      high_sr_filter='INFO/HIGH_SR_BACKGROUND = 1'
+    elif grep -qF '##FILTER=<ID=HIGH_SR_BACKGROUND,' headers.txt; then
+      high_sr_filter='FILTER ~ "HIGH_SR_BACKGROUND"'
+    else
+      printf 'HIGH_SR_BACKGROUND not found in BCF\n' >&2
       exit 1
     fi
     bcftools view \
@@ -857,7 +865,7 @@ task FilterOffspringSites {
       --include 'SVTYPE = "DUP" && ALGORITHMS = "depth" && SVLEN < ~{depth_only_size}' \
       --format '%ID\n' \
       sites_only.bcf > depth_only_fail
-    bcftools query --include 'INFO/HIGH_SR_BACKGROUND = 1' --format '%ID\n' \
+    bcftools query --include "${high_sr_filter}" --format '%ID\n' \
       sites_only.bcf > high_sr_fail
 
     bcftools query --format '%CHROM\t%POS0\t%END\t%ID\n' sites_only.bcf > sites.bed
