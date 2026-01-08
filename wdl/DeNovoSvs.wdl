@@ -1419,12 +1419,12 @@ task MakeDeNovoCalls {
       | xargs mv -t tmp/father
     cat '~{write_lines(mother_filtered_tsvs)}' \
       | xargs mv -t tmp/mother
-    printf 'chr\tstart\tend\tsvlen\tname\tsvtype\tsample\n' \
+    printf 'chr\tstart\tend\tsvlen\tname\tsvtype\tsample\tis_de_novo\n' \
       | gzip -c > '~{contig}-denovos.tsv.gz'
     find tmp -type f '!' -empty -exec gzip -cd '{}' \; \
       | LC_ALL=C sort \
       | uniq -c \
-      | awk '$1==3{sub(/^ *[0-9]+ /, ""); print}' \
+      | awk '$1==3{sub(/^ *[0-9]+ /, ""); $0 = $0"\tTRUE"; print}' \
       | gzip -c >> '~{contig}-denovos.tsv.gz'
   >>>
 }
