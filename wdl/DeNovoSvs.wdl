@@ -20,6 +20,11 @@ workflow DeNovoSvs {
     Array[File]? exclude_regions
     Float exclude_regions_ovp = 0.5
 
+    # Exclude SVs larger than 1Mb (useful if these have already been reviewed)
+    Boolean remove_large_svs = false
+    # Exclude genomic disorder regions (useful if these have already been reviewed)
+    File? genomic_disorders_bed
+
     # Either a single VCF or an array of VCFs with each one containing a single
     # contig. In the case of a single VCF, it is expected that all the contigs
     # in the input contigs are present. In the case of multiple VCFs, all VCFs
@@ -154,6 +159,8 @@ workflow DeNovoSvs {
         depth_only_size = depth_only_size,
         exclude_regions = exclude_regions,
         exclude_regions_ovp = exclude_regions_ovp,
+        remove_large_svs = remove_large_svs,
+        genomic_disorders_bed = genomic_disorders_bed,
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_filter_offspring_sites
     }
@@ -783,6 +790,9 @@ task RemoveUncalledSvtypes {
 #    c. small CNVs that are SR-only and don't have BOTHSIDES_SUPPORT
 #    d. are depth-only DUPs and are smaller than the depth-only size threshold
 #    e. have a HIGH_SR_BACKGROUND flag
+# Optionally remove sites that:
+#    1. are equal to or greater than 1Mb in size
+#    2. are CNVs that have >= 50% reciprocal overlap with a genomic disorder region
 task FilterOffspringSites {
   input {
     File bcf
@@ -792,6 +802,8 @@ task FilterOffspringSites {
     Int depth_only_size
     Array[File]? exclude_regions
     Float exclude_regions_ovp
+    Boolean remove_large_svs
+    File? genomic_disorders_bed
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
@@ -804,6 +816,8 @@ task FilterOffspringSites {
     depth_only_size: "Minimum size, in bases, of a DUP that is allowed to a depth-only call."
     exclude_regions: "BED3 files of genomic regions to exclude. The files are concatenated before testing for coverage."
     exclude_regions_ovp: "Fraction of SV that must be covered by exclude regions to be dropped."
+    remove_large_svs: "Should SVs equal to or larger than 1Mb be filtered?"
+    genomic_disorders_bed: "BED3 of genomic disorder regions. If given, CNVs covered by more than 50% by GDs are filtered."
     sv_base_mini_docker: "The corresponding Docker image from GATK-SV."
     runtime_attr_override: "Runtime attribute overrides."
   }
@@ -854,6 +868,10 @@ task FilterOffspringSites {
       --format '%ID\n' \
       sites_only.bcf > af_fail
 
+    if [[ '~{true=1 false=0 remove_large_svs}' = 1 ]]; then
+      bcftools query --include 'SVLEN >= 1000000' --format '%ID\n' sites_only.bcf > large_sv_fail
+    fi
+
     bcftools head sites_only.bcf | grep '^##' > headers.txt
 
     # Older GATK-SV VCFs have BOTHSIDES_SUPPORT and HIGH_SR_BACKGROUND in the
@@ -897,7 +915,23 @@ task FilterOffspringSites {
         | awk -F'\t' '$8 >= ovp {print $4}' ovp=~{exclude_regions_ovp} >> exclude_regions_fail
     fi
 
-    cat af_fail bothsides_fail depth_only_fail high_sr_fail exclude_regions_fail | sort -u > blacklist
+    if [[ '~{if defined(genomic_disorders_bed) then 1 else 0}' = 1 ]]; then
+      bcftools query --include 'SVTYPE = "DEL" || SVTYPE = "DUP"' --format '%CHROM\t%POS0\t%END\t%ID\n' sites_only.bcf > cnvs.bed
+      bedtools intersect -a cnvs.bed -b '~{select_first([genomic_disorders_bed])}' -r 0.5 -u \
+        | cut -f 4 > gd_fail
+    fi
+
+    : > optional_fail
+    cat large_sv_fail || true >> optional_fail
+    cat gd_fail || true >> optional_fail
+
+    cat optional_fail \
+      af_fail \
+      bothsides_fail \
+      depth_only_fail \
+      high_sr_fail \
+      exclude_regions_fail \
+      | sort -u > blacklist
 
     bcftools view --exclude 'ID = @blacklist' --output-type u \
       --output '~{filtered_bcf_name}' '~{bcf}'
