@@ -33,6 +33,12 @@ workflow DeNovoSvs {
 
     File reference_dict
 
+    # For annotating de novo calls by genomic context. All files must be sorted.
+    File repeatmaster_bed
+    File segdup_bed
+    File simple_repeat_bed
+    File protein_coding_genes_bed
+
     # Raw data
     Array[String] batch_name_list            # batch IDs
     Array[File] batch_sample_lists           # samples in each batch (filtered set)
@@ -65,10 +71,11 @@ workflow DeNovoSvs {
     RuntimeAttr? runtime_override_filter_genotypes
     RuntimeAttr? runtime_override_make_denovo_calls
     RuntimeAttr? runtime_override_merge_denovo_calls
+    RuntimeAttr? runtime_override_annotate_genomic_context
   }
 
   output {
-    File merged_denovos = MergeDeNovoCalls.merged_denovos
+    File merged_denovos = AnnotateGenomicContext.annotated_denovos
   }
 
   call MakeManifests {
@@ -271,6 +278,17 @@ workflow DeNovoSvs {
       denovos = MakeDeNovoCalls.denovos_tsv,
       linux_docker = linux_docker,
       runtime_attr_override = runtime_override_merge_denovo_calls
+  }
+
+  call AnnotateGenomicContext {
+    input:
+      denovos = MergeDeNovoCalls.merged_denovos,
+      rm = repeatmaster_bed,
+      sr = simple_repeat_bed,
+      sd = segdup_bed,
+      pc_genes = protein_coding_genes_bed,
+      sv_base_mini_docker = sv_base_mini_docker,
+      runtime_attr_override = runtime_override_annotate_genomic_context
   }
 }
 
@@ -1476,5 +1494,79 @@ task MergeDeNovoCalls {
     awk 'NR>1' "${manifest}" \
       | while read -r f; do gzip -cd "${f}" | awk 'NR>1'; done \
       | gzip -c >> 'denovo_svs.tsv.gz'
+  >>>
+}
+
+task AnnotateGenomicContext {
+  input {
+    File denovos
+    File rm
+    File sr
+    File sd
+    File pc_genes
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  parameter_meta {
+    denovos: "TSV with de novo calls."
+    rm: "BED3 file of RepeatMasker regions. Must be sorted."
+    sr: "BED3 file of simple repeat regions. Must be sorted."
+    sd: "BED3 file of segmental duplication regions. Must be sorted."
+    pc_genes: "BED3 file of protein coding genes. Must be sorted."
+    sv_base_mini_docker: "The corresponding Docker image from GATK-SV."
+    runtime_attr_override: "Runtime attribute overrides."
+  }
+
+  output {
+    File annotated_denovos = "denovo_svs-annotated.tsv.gz"
+  }
+
+  Float disk_size = size(denovos, "GB") * 5 + size([rm, sr, sd], "GB")
+
+  RuntimeAttr default_attr = object {
+    mem_gb: 4,
+    cpu_cores: 1,
+    disk_gb: ceil(disk_size) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: "${select_first([runtime_attr.mem_gb, default_attr.mem_gb])} GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk ${select_first([runtime_attr.disk_gb, default_attr.disk_gb])} HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
+  }
+
+  command <<<
+    set -euxo pipefail
+
+    gzip -cd '~{denovos}' \
+      | awk -F'\t' 'BEGIN{OFMT="%.0f"; OFS="\t"} NR>1{print $1,$2-1,$3,$4}' \
+      | LC_ALL=C sort -k1,1 -k2,2n > sites.bed
+    bedtools coverage -a sites.bed -b '~{rm}' --sorted \
+      | awk -F'\t' '$8>=0.5{print $4,"RM"}' OFS='\t' > rm_annotations.tsv
+    bedtools coverage -a sites.bed -b '~{sr}' --sorted \
+      | awk -F'\t' '$8>=0.5{print $4,"SR"}' OFS='\t' > sr_annotations.tsv
+    bedtools coverage -a sites.bed -b '~{sd}' --sorted \
+      | awk -F'\t' '$8>=0.5{print $4,"SD"}' OFS='\t' > sd_annotations.tsv
+    bedtools intersect -a sites.bed -b '~{pc_genes}' --sorted -u \
+      | cut -f 4 > overlap_genes
+
+    printf 'chr\tstart\tend\tsvlen\tname\tsvtype\tgenomic_context\tovp_pc_gene\tsample\tis_de_novo\n' > header
+    gzip -cd '~{denovos}' \
+      | awk -F'\t' 'NR>1{print $1,$2,$3,$4,$5,$6,"UN",0,$7,$8}' OFS="\t" \
+      | awk -F'\t' 'BEGIN{OFS="\t"}NR==FNR{a[$1]=$2; next}NR>FNR && ($5 in a){$7=a[$5]} 1' sr_annotations.tsv - \
+      | awk -F'\t' 'BEGIN{OFS="\t"}NR==FNR{a[$1]=$2; next}NR>FNR && ($5 in a){$7=a[$5]} 1' rm_annotations.tsv - \
+      | awk -F'\t' 'BEGIN{OFS="\t"}NR==FNR{a[$1]=$2; next}NR>FNR && ($5 in a){$7=a[$5]} 1' sd_annotations.tsv - \
+      | awk -F'\t' 'BEGIN{OFS="\t"}NR==FNR{a[$1]; next}NR>FNR && ($5 in a){$8=1} 1' overlap_genes - \
+      | cat header - \
+      | gzip -c > denovo_svs-annotated.tsv.gz
   >>>
 }
