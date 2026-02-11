@@ -46,11 +46,10 @@ workflow DeNovoSvsGroupOffspringBcf {
   }
 }
 
-# Subset a VCF or BCF offspring samples into three different groups. The
-# task should be scattered over the batches and the samples in each
-# group are the offspring samples in the current batch, the samples whose
-# fathers are in the current batch, and the samples whose mothers are in
-# the current batch.
+# Subset a VCF or BCF with offspring samples into three different groups. The
+# task should be scattered over the batches and the samples in each group are
+# the offspring samples in the current batch, the samples whose fathers are in
+# the current batch, and the samples whose mothers are in the current batch.
 task GroupBcfByFamilyBatch {
   input {
     File bcf
