@@ -907,7 +907,7 @@ task FilterOffspringSites {
     gd_bed_path='~{if defined(genomic_disorders_bed) then select_first([genomic_disorders_bed]) else ""}'
     if [[ -n "${gd_bed_path:-}" ]]; then
       bcftools query --include 'SVTYPE = "DEL" || SVTYPE = "DUP"' --format '%CHROM\t%POS0\t%END\t%ID\n' sites_only.bcf > cnvs.bed
-      bedtools intersect -a cnvs.bed -b "${gd_bed_path}" -r 0.5 -u \
+      bedtools intersect -a cnvs.bed -b "${gd_bed_path}" -r -f 0.5 -u \
         | cut -f 4 > gd_fail
     fi
 
