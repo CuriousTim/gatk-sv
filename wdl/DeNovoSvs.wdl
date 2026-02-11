@@ -225,7 +225,8 @@ workflow DeNovoSvs {
     String current_batch = basename(by_offspring_batch[i])
     call MergeClusteredBatchVcfs {
       input:
-        vcfs = MakeManifests.raw_vcf_map[current_batch],
+        pesr_vcfs = MakeManifests.pesr_vcf_map[current_batch],
+        depth_vcf = MakeManifests.depth_vcf_map[current_batch],
         batch_id = current_batch,
         offspring_ids = by_offspring_batch[i],
         father_ids = father_ids[i],
@@ -236,10 +237,14 @@ workflow DeNovoSvs {
 
     call SVConcordance {
       input:
-        truth_vcf = MergeClusteredBatchVcfs.merged_vcf,
-        truth_vcf_index = MergeClusteredBatchVcfs.merged_vcf_index,
-        eval_vcf = MergeOffspringSites.merged_vcf,
-        eval_vcf_index = MergeOffspringSites.merged_vcf_index,
+        batch_pesr_vcf = MergeClusteredBatchVcfs.merged_pesr_vcf,
+        batch_pesr_vcf_index = MergeClusteredBatchVcfs.merged_pesr_vcf_index,
+        batch_depth_vcf = MergeClusteredBatchVcfs.merged_depth_vcf,
+        batch_depth_vcf_index = MergeClusteredBatchVcfs.merged_depth_vcf_index,
+        offspring_pesr_vcf = MergeOffspringSites.merged_pesr_vcf,
+        offspring_pesr_vcf_index = MergeOffspringSites.merged_pesr_vcf_index,
+        offspring_depth_vcf = MergeOffspringSites.merged_depth_vcf,
+        offspring_depth_vcf_index = MergeOffspringSites.merged_depth_vcf_index,
         concordance_prefix = "${current_batch}-concordance",
         reference_dict = reference_dict,
         svconcordance_keep_all_docker = svconcordance_keep_all_docker,
@@ -256,8 +261,10 @@ workflow DeNovoSvs {
         offspring_genotypes = MergeClusteredBatchVcfs.offspring_genotypes,
         father_genotypes = MergeClusteredBatchVcfs.father_genotypes,
         mother_genotypes = MergeClusteredBatchVcfs.mother_genotypes,
-        strict_concordance_vcf = SVConcordance.strict_concordance_vcf,
-        lenient_concordance_vcf = SVConcordance.lenient_concordance_vcf,
+        strict_pesr_concordance_vcf = SVConcordance.strict_pesr_concordance_vcf,
+        strict_depth_concordance_vcf = SVConcordance.strict_depth_concordance_vcf,
+        lenient_pesr_concordance_vcf = SVConcordance.lenient_pesr_concordance_vcf,
+        lenient_depth_concordance_vcf = SVConcordance.lenient_depth_concordance_vcf,
         pedigree = SubsetSamples.ped_subset,
         denovo_docker = denovo_docker,
         runtime_attr_override = runtime_override_filter_genotypes
@@ -335,9 +342,10 @@ task MakeManifests {
 
   output {
     File sample_manifest = "sample_manifest.tsv"
-    Map[String, Array[String]] raw_vcf_map = read_json("raw_manifest.json")["raw_vcf"]
-    Map[String, String] bincov_map = read_json("bincov_manifest.json")["bincov"]
-    Map[String, String] bincov_index_map = read_json("bincov_index_manifest.json")["bincov_index"]
+    Map[String, Array[String]] pesr_vcf_map = read_json("pesr_manifest.json")["pesr_vcf"]
+    Map[String, String] depth_vcf_map = read_map("depth_manifest.tsv")
+    Map[String, String] bincov_map = read_map("bincov_manifest.tsv")
+    Map[String, String] bincov_index_map = read_map("bincov_index_manifest.tsv")
   }
 
   Float input_size = size(batch_sample_lists, "GB")
@@ -397,44 +405,25 @@ task MakeManifests {
         exit 1
     fi
 
-    cat depth_manifest.tsv pesr_manifest.tsv > raw_manifest.tsv
-
     paste "${batch_names}" '~{write_lines(batch_sample_lists)}' \
       | awk -F'\t' '{while((getline line < $2) > 0) {print $1 "\t" line}}' \
       | sort -u -k2,2 > 'sample_manifest.tsv'
 
-    paste "${batch_names}" '~{write_lines(batch_bincov_matrix)}' \
-      '~{write_lines(batch_bincov_matrix_index)}' > 'bincov_manifest.tsv'
-
-    cut -f 1,2 'bincov_manifest.tsv' > 'bincov.tsv'
-    cut -f 1,3 'bincov_manifest.tsv' > 'bincov_index.tsv'
+    paste "${batch_names}" '~{write_lines(batch_bincov_matrix)}' > 'bincov_manifest.tsv'
+    paste "${batch_names}" '~{write_lines(batch_bincov_matrix_index)}' > 'bincov_index_manifest.tsv'
 
 duckdb <<'EOF'
 COPY (
-  SELECT json_group_object(batch, vcfs) AS raw_vcf
+  SELECT json_group_object(batch, vcfs) AS pesr_vcf
   FROM (
     SELECT batch, list(vcf) AS vcfs
-    FROM read_csv('raw_manifest.tsv',
+    FROM read_csv('pesr_manifest.tsv',
                   delim = '\t',
                   header = false,
                   names = ['batch', 'vcf'])
     GROUP BY batch
   )
-) TO 'raw_manifest.json' (FORMAT JSON);
-COPY (
-  SELECT json_group_object(batch, bincov) AS bincov
-  FROM read_csv('bincov.tsv',
-                delim = '\t',
-                header = false,
-                names = ['batch', 'bincov'])
-) TO 'bincov_manifest.json' (FORMAT JSON);
-COPY (
-  SELECT json_group_object(batch, bincov_index) AS bincov_index
-  FROM read_csv('bincov_index.tsv',
-                delim = '\t',
-                header = false,
-                names = ['batch', 'bincov_index'])
-) TO 'bincov_index_manifest.json' (FORMAT JSON);
+) TO 'pesr_manifest.json' (FORMAT JSON);
 EOF
   >>>
 }
@@ -1046,8 +1035,10 @@ task MergeOffspringSites {
   }
 
   output {
-    File merged_vcf = vcf_name
-    File merged_vcf_index = "${vcf_name}.tbi"
+    File merged_depth_vcf = depth_vcf_name
+    File merged_depth_vcf_index = "${depth_vcf_name}.tbi"
+    File merged_pesr_vcf = pesr_vcf_name
+    File merged_pesr_vcf_index = "${pesr_vcf_name}.tbi"
   }
 
   RuntimeAttr default_attr = object {
@@ -1070,7 +1061,8 @@ task MergeOffspringSites {
     docker: sv_base_mini_docker
   }
 
-  String vcf_name = "merged.vcf.gz"
+  String depth_vcf_name = "depth-merged.vcf.gz"
+  String pesr_vcf_name = "pesr-merged.vcf.gz"
 
   command <<<
     set -euxo pipefail
@@ -1079,16 +1071,21 @@ task MergeOffspringSites {
     awk -F'\t' 'NR==FNR{a[$1]=$2} NR>FNR && ($1 in a){print a[$1]}' \
       bcfs.tsv '~{write_lines(contigs_order)}' > merge_list
 
-    bcftools concat --file-list merge_list --output '~{vcf_name}' \
-      --output-type z
-    bcftools index --tbi '~{vcf_name}'
+    bcftools concat --file-list merge_list --output merged.bcf --output-type b
+    bcftools view --include 'INFO/SVLEN >= 5000 && (INFO/SVTYPE = "DUP" || INFO/SVTYPE = "DEL")' \
+      --output '~{depth_vcf_name}' --output-type z merged.bcf
+    bcftools index --tbi '~{depth_vcf_name}'
+    bcftools view --exclude 'INFO/SVLEN >= 5000 && (INFO/SVTYPE = "DUP" || INFO/SVTYPE = "DEL")' \
+      --output '~{pesr_vcf_name}' --output-type z merged.bcf
+    bcftools index --tbi '~{pesr_vcf_name}'
   >>>
 }
 
 # Merge raw evidence VCFs.
 task MergeClusteredBatchVcfs {
   input {
-    Array[File]+ vcfs
+    Array[File]+ pesr_vcfs
+    File depth_vcf
     String batch_id
     File offspring_ids
     File father_ids
@@ -1098,7 +1095,8 @@ task MergeClusteredBatchVcfs {
   }
 
   parameter_meta {
-    vcfs: "VCFs from a single batch to merge."
+    pesr_vcfs: "PE/SR evidence-based VCFs from a single batch to merge."
+    depth_vcf: "Depth evidence-based VCF from a single batch."
     batch_id: "Batch ID of this batch."
     offspring_ids: "IDs of offspring in this batch."
     father_ids: "IDs of fathers in this batch."
@@ -1108,8 +1106,10 @@ task MergeClusteredBatchVcfs {
   }
 
   output {
-    File merged_vcf = "${batch_id}-sites_only-merged.vcf.gz"
-    File merged_vcf_index = "${batch_id}-sites_only-merged.vcf.gz.tbi"
+    File merged_pesr_vcf = "${batch_id}-pesr-sites_only-merged.vcf.gz"
+    File merged_pesr_vcf_index = "${batch_id}-pesr-sites_only-merged.vcf.gz.tbi"
+    File merged_depth_vcf = "${batch_id}-depth-sites_only-merged.vcf.gz"
+    File merged_depth_vcf_index = "${batch_id}-depth-sites_only-merged.vcf.gz.tbi"
     File offspring_genotypes = "${batch_id}-offspring_genotypes.tsv.gz"
     File father_genotypes = "${batch_id}-father_genotypes.tsv.gz"
     File mother_genotypes = "${batch_id}-mother_genotypes.tsv.gz"
@@ -1118,7 +1118,7 @@ task MergeClusteredBatchVcfs {
   RuntimeAttr default_attr = object {
     mem_gb: 4,
     cpu_cores: 1,
-    disk_gb: ceil(size(vcfs, "GB") * 4) + 16,
+    disk_gb: ceil((size(pesr_vcfs, "GB") + size(depth_vcf, "GB")) * 4) + 16,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1
@@ -1152,11 +1152,11 @@ task MergeClusteredBatchVcfs {
       awk '{print $1"\t-\tmother.bcf"}' '~{mother_ids}' >> groups.tsv
     fi
 
-    vcfs='~{write_lines(vcfs)}'
+    pesr_vcfs='~{write_lines(pesr_vcfs)}'
     declare -i i=0
     while read -r vcf; do
-      dest_dir="algo_${i}"
-      mkdir "${dest_dir}"
+      dest_dir="pesr/algo_${i}"
+      mkdir -p "${dest_dir}"
       bcftools +split --groups-file groups.tsv --output "${dest_dir}" --output-type b \
         --exclude 'INFO/SVTYPE = "BND" || INFO/SVTYPE = "CPX" || INFO/SVTYPE = "CTX" || INFO/SVTYPE = "CNV"' \
         "${vcf}"
@@ -1165,7 +1165,16 @@ task MergeClusteredBatchVcfs {
         --output "${dest_dir}/sites_only.bcf" "${vcf}"
       bcftools index "${dest_dir}/sites_only.bcf"
       i=$((i + 1))
-    done < "${vcfs}"
+    done < "${pesr_vcfs}"
+
+    mkdir depth
+    bcftools +split --groups-file groups.tsv --output depth --output-type b \
+      --exclude 'INFO/SVTYPE = "BND" || INFO/SVTYPE = "CPX" || INFO/SVTYPE = "CTX" || INFO/SVTYPE = "CNV"' \
+      '~{depth_vcf}'
+    bcftools view --drop-genotypes --output-type b \
+      --exclude 'INFO/SVTYPE = "BND" || INFO/SVTYPE = "CPX" || INFO/SVTYPE = "CTX" || INFO/SVTYPE = "CNV"' \
+      --output "depth/sites_only.bcf" '~{depth_vcf}'
+    bcftools index "depth/sites_only.bcf"
 
     find . -type f -name 'offspring.bcf' \
       | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
@@ -1179,20 +1188,29 @@ task MergeClusteredBatchVcfs {
       | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
       | gzip -c > '~{batch_id}-mother_genotypes.tsv.gz'
 
-    bcftools concat --file-list <(find . -type f -name 'sites_only.bcf') --allow-overlaps \
+    bcftools concat --file-list <(find pesr -type f -name 'sites_only.bcf') --allow-overlaps \
       --output-type u \
-      | bcftools sort --max-mem '~{max_sort_mem}G' --output '~{batch_id}-sites_only-merged.vcf.gz' \
+      | bcftools sort --max-mem '~{max_sort_mem}G' --output '~{batch_id}-pesr-sites_only-merged.vcf.gz' \
         --output-type z
-    bcftools index --tbi '~{batch_id}-sites_only-merged.vcf.gz'
+    bcftools index --tbi '~{batch_id}-pesr-sites_only-merged.vcf.gz'
+    bcftools concat --file-list <(find depth -type f -name 'sites_only.bcf') --allow-overlaps \
+      --output-type u \
+      | bcftools sort --max-mem '~{max_sort_mem}G' --output '~{batch_id}-depth-sites_only-merged.vcf.gz' \
+        --output-type z
+    bcftools index --tbi '~{batch_id}-depth-sites_only-merged.vcf.gz'
   >>>
 }
 
 task SVConcordance {
   input {
-    File truth_vcf
-    File truth_vcf_index
-    File eval_vcf
-    File eval_vcf_index
+    File batch_pesr_vcf
+    File batch_pesr_vcf_index
+    File batch_depth_vcf
+    File batch_depth_vcf_index
+    File offspring_pesr_vcf
+    File offspring_pesr_vcf_index
+    File offspring_depth_vcf
+    File offspring_depth_vcf_index
     String concordance_prefix
     File reference_dict
     String svconcordance_keep_all_docker
@@ -1200,10 +1218,14 @@ task SVConcordance {
   }
 
   parameter_meta {
-    truth_vcf: "VCF against which to match variants."
-    truth_vcf_index: "Index file of the truth VCF."
-    eval_vcf: "VCF to annotate with variants matched in the truth VCF."
-    eval_vcf_index: "Index file of the evaluation VCF."
+    batch_pesr_vcf: "Batch PE/SR VCFs merged."
+    batch_pesr_vcf_index: "Batch PE/SR VCFs merged index."
+    batch_depth_vcf: "Batch depth VCF."
+    batch_depth_vcf_index: "Batch depth VCF index."
+    offspring_pesr_vcf: "Offspring PE/SR site VCFs merged."
+    offspring_pesr_vcf: "Offspring PE/SR site VCFs merged index."
+    offspring_depth_vcf: "Offspring depth sites VCF."
+    offspring_depth_vcf_index: "Offspring depth sites VCF index."
     concordance_prefix: "Prefix of the output VCF."
     reference_dict: "Sequence dictionary in the form of a '.dict' file."
     svconcordance_keep_all_docker: "Docker with a build of GATK that supports the `--keep-all` option of SVConcordance."
@@ -1211,14 +1233,21 @@ task SVConcordance {
   }
 
   output {
-    File strict_concordance_vcf = "${strict_concordance_name}"
-    File lenient_concordance_vcf = "${lenient_concordance_name}"
+    File strict_pesr_concordance_vcf = "${strict_pesr_name}"
+    File strict_depth_concordance_vcf = "${strict_depth_name}"
+    File lenient_pesr_concordance_vcf= "${lenient_pesr_name}"
+    File lenient_depth_concordance_vcf= "${lenient_depth_name}"
   }
+
+  Float vcfs_size = size(batch_depth_vcf, "GB") +
+    size(batch_pesr_vcf, "GB") +
+    size(offspring_depth_vcf, "GB") +
+    size(offspring_pesr_vcf, "GB")
 
   RuntimeAttr default_attr = object {
     mem_gb: 4,
     cpu_cores: 1,
-    disk_gb: ceil(size([truth_vcf, eval_vcf], "GB") * 2) + 16,
+    disk_gb: ceil(vcfs_size * 2) + 16,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
@@ -1237,11 +1266,24 @@ task SVConcordance {
     docker: svconcordance_keep_all_docker
   }
 
-  String strict_concordance_name = "${concordance_prefix}-strict.vcf.gz"
-  String lenient_concordance_name = "${concordance_prefix}-lenient.vcf.gz"
+  String strict_depth_name = "${concordance_prefix}-strict-depth.vcf.gz"
+  String strict_pesr_name = "${concordance_prefix}-strict-pesr.vcf.gz"
+  String lenient_depth_name = "${concordance_prefix}-lenient-depth.vcf.gz"
+  String lenient_pesr_name = "${concordance_prefix}-lenient-pesr.vcf.gz"
 
   command <<<
     set -euxo pipefail
+
+    concordance() {
+      gatk --java-options '-Xmx~{jvm_mem}M' SVConcordance \
+        --keep-all \
+        --sequence-dictionary '~{reference_dict}' \
+        --eval "$1" \
+        --truth "$2" \
+        --output "$3" \
+        --stratify-config stratify.tsv \
+        --clustering-config "$4"
+    }
 
     printf 'NAME\tSVTYPE\tMIN_SIZE\tMAX_SIZE\tTRACKS\n' > stratify.tsv
     printf 'DEL_small\tDEL\t-1\t5000\tNULL\n' >> stratify.tsv
@@ -1270,23 +1312,14 @@ task SVConcordance {
     printf 'INV_large\t0.5\t0\t100000000\t0\n' >> cluster_lenient.tsv
     printf 'INS\t0\t0\t500\t0\n' >> cluster_lenient.tsv
 
-    gatk --java-options '-Xmx~{jvm_mem}M' SVConcordance \
-      --keep-all \
-      --sequence-dictionary '~{reference_dict}' \
-      --eval '~{eval_vcf}' \
-      --truth '~{truth_vcf}'\
-      --output '~{strict_concordance_name}' \
-      --stratify-config stratify.tsv \
-      --clustering-config cluster_strict.tsv
-
-    gatk --java-options '-Xmx~{jvm_mem}M' SVConcordance \
-      --keep-all \
-      --sequence-dictionary '~{reference_dict}' \
-      --eval '~{eval_vcf}' \
-      --truth '~{truth_vcf}'\
-      --output '~{lenient_concordance_name}' \
-      --stratify-config stratify.tsv \
-      --clustering-config cluster_lenient.tsv
+    concordance '~{offspring_pesr_vcf}' '~{batch_pesr_vcf}' \
+      '~{strict_pesr_name}' cluster_strict.tsv
+    concordance '~{offspring_depth_vcf}' '~{batch_depth_vcf}' \
+      '~{strict_depth_name}' cluster_strict.tsv
+    concordance '~{offspring_pesr_vcf}' '~{batch_pesr_vcf}' \
+      '~{lenient_pesr_name}' cluster_lenient.tsv
+    concordance '~{offspring_depth_vcf}' '~{batch_depth_vcf}' \
+      '~{lenient_depth_name}' cluster_lenient.tsv
   >>>
 }
 
@@ -1301,8 +1334,10 @@ task FilterGenotypes {
     File offspring_genotypes
     File father_genotypes
     File mother_genotypes
-    File strict_concordance_vcf
-    File lenient_concordance_vcf
+    File strict_pesr_concordance_vcf
+    File strict_depth_concordance_vcf
+    File lenient_pesr_concordance_vcf
+    File lenient_depth_concordance_vcf
     File pedigree
     String denovo_docker
     RuntimeAttr? runtime_attr_override
@@ -1317,8 +1352,10 @@ task FilterGenotypes {
     offspring_genotypes: "Offspring genotypes from the MergeClusteredBatchVcfs."
     father_genotypes: "Father genotypes from the MergeClusteredBatchVcfs."
     mother_genotypes: "Mother genotypes from the MergeClusteredBatchVcfs."
-    strict_concordance_vcf: "SVConcordance VCF between offspring sites and ClusterBatch sites with strict parameters."
-    lenient_concordance_vcf: "SVConcordance VCF between offspring sites and ClusterBatch sites with lenient parameters."
+    strict_pesr_concordance_vcf: "SVConcordance VCF between offspring PE/SR sites and ClusterBatch PE/SR sites with strict parameters."
+    strict_depth_concordance_vcf: "SVConcordance VCF between offspring depth sites and ClusterBatch depth sites with strict parameters."
+    lenient_pesr_concordance_vcf: "SVConcordance VCF between offspring PE/SR sites and ClusterBatch PE/SR sites with lenient parameters."
+    lenient_depth_concordance_vcf: "SVConcordance VCF between offspring depth sites and ClusterBatch depth sites with lenient parameters."
     pedigree: "Cohort pedigree."
     denovo_docker: "The corresponding Docker image from GATK-SV."
     runtime_attr_override: "Runtime attribute overrides."
@@ -1336,8 +1373,10 @@ task FilterGenotypes {
     + size(offspring_genotypes, "GB")
     + size(father_genotypes, "GB")
     + size(mother_genotypes, "GB")
-    + size(strict_concordance_vcf, "GB")
-    + size(lenient_concordance_vcf, "GB")
+    + size(strict_pesr_concordance_vcf, "GB")
+    + size(strict_depth_concordance_vcf, "GB")
+    + size(lenient_pesr_concordance_vcf, "GB")
+    + size(lenient_depth_concordance_vcf, "GB")
 
   RuntimeAttr default_attr = object {
     mem_gb: 4,
@@ -1382,17 +1421,23 @@ task FilterGenotypes {
       --output by_father.bcf --output-type b
     bcftools concat --file-list '~{write_lines(by_mother_batch_bcfs)}' \
       --output by_mother.bcf --output-type b
+    bcftools concat --allow-overlaps --naive \
+      '~{strict_pesr_concordance_vcf}' '~{strict_depth_concordance_vcf}' \
+      --output strict_concordance.bcf --output-type b
+    bcftools concat --allow-overlaps --naive \
+      '~{lenient_pesr_concordance_vcf}' '~{lenient_depth_concordance_vcf}' \
+      --output lenient_concordance.bcf --output-type b
 
-    filtergt by_offspring.bcf '~{strict_concordance_vcf}' \
+    filtergt by_offspring.bcf strict_concordance.bcf \
       '~{offspring_genotypes}' \
       'self_filtered.bcf'
     cut -f2,3 '~{pedigree}' > fathers.tsv
-    filtergt by_father.bcf '~{lenient_concordance_vcf}' \
+    filtergt by_father.bcf lenient_concordance.bcf \
       '~{father_genotypes}' \
       'father_filtered.bcf' \
       fathers.tsv
     cut -f2,4 '~{pedigree}' > mothers.tsv
-    filtergt by_mother.bcf '~{lenient_concordance_vcf}' \
+    filtergt by_mother.bcf lenient_concordance.bcf \
       '~{mother_genotypes}' \
       'mother_filtered.bcf' \
       mothers.tsv
