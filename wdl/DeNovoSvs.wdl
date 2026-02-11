@@ -1421,10 +1421,10 @@ task FilterGenotypes {
       --output by_father.bcf --output-type b
     bcftools concat --file-list '~{write_lines(by_mother_batch_bcfs)}' \
       --output by_mother.bcf --output-type b
-    bcftools concat --allow-overlaps --naive \
+    bcftools concat --allow-overlaps \
       '~{strict_pesr_concordance_vcf}' '~{strict_depth_concordance_vcf}' \
       --output strict_concordance.bcf --output-type b
-    bcftools concat --allow-overlaps --naive \
+    bcftools concat --allow-overlaps \
       '~{lenient_pesr_concordance_vcf}' '~{lenient_depth_concordance_vcf}' \
       --output lenient_concordance.bcf --output-type b
 
