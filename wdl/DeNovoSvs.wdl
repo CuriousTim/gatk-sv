@@ -1634,13 +1634,13 @@ task AnnotateGenomicContext {
     gzip -cd '~{denovos}' \
       | awk -F'\t' 'BEGIN{OFMT="%.0f"; OFS="\t"} NR>1{print $1,$2-1,$3,$4}' \
       | LC_ALL=C sort -k1,1 -k2,2n > sites.bed
-    bedtools coverage -a sites.bed -b '~{rm}' --sorted \
+    bedtools coverage -a sites.bed -b '~{rm}' -sorted \
       | awk -F'\t' '$8>=0.5{print $4,"RM"}' OFS='\t' > rm_annotations.tsv
-    bedtools coverage -a sites.bed -b '~{sr}' --sorted \
+    bedtools coverage -a sites.bed -b '~{sr}' -sorted \
       | awk -F'\t' '$8>=0.5{print $4,"SR"}' OFS='\t' > sr_annotations.tsv
-    bedtools coverage -a sites.bed -b '~{sd}' --sorted \
+    bedtools coverage -a sites.bed -b '~{sd}' -sorted \
       | awk -F'\t' '$8>=0.5{print $4,"SD"}' OFS='\t' > sd_annotations.tsv
-    bedtools intersect -a sites.bed -b '~{pc_genes}' --sorted -u \
+    bedtools intersect -a sites.bed -b '~{pc_genes}' -sorted -u \
       | cut -f 4 > overlap_genes
 
     printf 'chr\tstart\tend\tsvlen\tname\tsvtype\tgenomic_context\tovp_pc_gene\tsample\tis_de_novo\n' > header
