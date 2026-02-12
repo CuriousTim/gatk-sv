@@ -1171,10 +1171,10 @@ task MergeClusteredBatchVcfs {
     bcftools +split --groups-file groups.tsv --output depth --output-type b \
       --exclude 'INFO/SVTYPE = "BND" || INFO/SVTYPE = "CPX" || INFO/SVTYPE = "CTX" || INFO/SVTYPE = "CNV"' \
       '~{depth_vcf}'
-    bcftools view --drop-genotypes --output-type b \
+    bcftools view --drop-genotypes --output-type z \
       --exclude 'INFO/SVTYPE = "BND" || INFO/SVTYPE = "CPX" || INFO/SVTYPE = "CTX" || INFO/SVTYPE = "CNV"' \
-      --output "depth/sites_only.bcf" '~{depth_vcf}'
-    bcftools index "depth/sites_only.bcf"
+      --output '~{batch_id}-depth-sites_only-merged.vcf.gz' '~{depth_vcf}'
+    bcftools index '~{batch_id}-depth-sites_only-merged.vcf.gz' 
 
     find . -type f -name 'offspring.bcf' \
       | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
@@ -1193,11 +1193,6 @@ task MergeClusteredBatchVcfs {
       | bcftools sort --max-mem '~{max_sort_mem}G' --output '~{batch_id}-pesr-sites_only-merged.vcf.gz' \
         --output-type z
     bcftools index --tbi '~{batch_id}-pesr-sites_only-merged.vcf.gz'
-    bcftools concat --file-list <(find depth -type f -name 'sites_only.bcf') --allow-overlaps \
-      --output-type u \
-      | bcftools sort --max-mem '~{max_sort_mem}G' --output '~{batch_id}-depth-sites_only-merged.vcf.gz' \
-        --output-type z
-    bcftools index --tbi '~{batch_id}-depth-sites_only-merged.vcf.gz'
   >>>
 }
 
