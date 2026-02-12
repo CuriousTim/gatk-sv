@@ -1174,7 +1174,7 @@ task MergeClusteredBatchVcfs {
     bcftools view --drop-genotypes --output-type z \
       --exclude 'INFO/SVTYPE = "BND" || INFO/SVTYPE = "CPX" || INFO/SVTYPE = "CTX" || INFO/SVTYPE = "CNV"' \
       --output '~{batch_id}-depth-sites_only-merged.vcf.gz' '~{depth_vcf}'
-    bcftools index '~{batch_id}-depth-sites_only-merged.vcf.gz' 
+    bcftools index --tbi '~{batch_id}-depth-sites_only-merged.vcf.gz' 
 
     find . -type f -name 'offspring.bcf' \
       | xargs -L 1 bcftools query --include 'GT="alt"' --format '%ID[\t%SAMPLE]\n' \
