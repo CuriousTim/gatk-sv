@@ -1072,10 +1072,10 @@ task MergeOffspringSites {
       bcfs.tsv '~{write_lines(contigs_order)}' > merge_list
 
     bcftools concat --file-list merge_list --output merged.bcf --output-type b
-    bcftools view --include 'INFO/SVLEN >= 5000 && (INFO/SVTYPE = "DUP" || INFO/SVTYPE = "DEL")' \
+    bcftools view --include 'INFO/SVLEN >= 10000 && (INFO/SVTYPE = "DUP" || INFO/SVTYPE = "DEL")' \
       --output '~{depth_vcf_name}' --output-type z merged.bcf
     bcftools index --tbi '~{depth_vcf_name}'
-    bcftools view --exclude 'INFO/SVLEN >= 5000 && (INFO/SVTYPE = "DUP" || INFO/SVTYPE = "DEL")' \
+    bcftools view --exclude 'INFO/SVLEN >= 10000 && (INFO/SVTYPE = "DUP" || INFO/SVTYPE = "DEL")' \
       --output '~{pesr_vcf_name}' --output-type z merged.bcf
     bcftools index --tbi '~{pesr_vcf_name}'
   >>>
