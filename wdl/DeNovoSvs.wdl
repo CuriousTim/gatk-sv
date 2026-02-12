@@ -1632,24 +1632,24 @@ task AnnotateGenomicContext {
     set -euxo pipefail
 
     gzip -cd '~{denovos}' \
-      | awk -F'\t' 'BEGIN{OFMT="%.0f"; OFS="\t"} NR>1{print $1,$2-1,$3,$4}' \
+      | awk -F'\t' 'BEGIN{OFMT="%.0f"; OFS="\t"} NR>1{print $1,$2-1,$3,$5}' \
       | LC_ALL=C sort -k1,1 -k2,2n > sites.bed
     bedtools coverage -a sites.bed -b '~{rm}' -sorted \
-      | awk -F'\t' '$8>=0.5{print $4,"RM"}' OFS='\t' > rm_annotations.tsv
+      | awk -F'\t' '$8>=0.5{print $4,"RM"}' OFS='\t' > rm_annot
     bedtools coverage -a sites.bed -b '~{sr}' -sorted \
-      | awk -F'\t' '$8>=0.5{print $4,"SR"}' OFS='\t' > sr_annotations.tsv
+      | awk -F'\t' '$8>=0.5{print $4,"SR"}' OFS='\t' > sr_annot
     bedtools coverage -a sites.bed -b '~{sd}' -sorted \
-      | awk -F'\t' '$8>=0.5{print $4,"SD"}' OFS='\t' > sd_annotations.tsv
+      | awk -F'\t' '$8>=0.5{print $4,"SD"}' OFS='\t' > sd_annot
     bedtools intersect -a sites.bed -b '~{pc_genes}' -sorted -u \
-      | cut -f 4 > overlap_genes
+      | cut -f 4 > genes_annot
 
     printf 'chr\tstart\tend\tsvlen\tname\tsvtype\tgenomic_context\tovp_pc_gene\tsample\tis_de_novo\n' > header
     gzip -cd '~{denovos}' \
       | awk -F'\t' 'NR>1{print $1,$2,$3,$4,$5,$6,"UN",0,$7,$8}' OFS="\t" \
-      | awk -F'\t' 'BEGIN{OFS="\t"}NR==FNR{a[$1]=$2; next}NR>FNR && ($5 in a){$7=a[$5]} 1' sr_annotations.tsv - \
-      | awk -F'\t' 'BEGIN{OFS="\t"}NR==FNR{a[$1]=$2; next}NR>FNR && ($5 in a){$7=a[$5]} 1' rm_annotations.tsv - \
-      | awk -F'\t' 'BEGIN{OFS="\t"}NR==FNR{a[$1]=$2; next}NR>FNR && ($5 in a){$7=a[$5]} 1' sd_annotations.tsv - \
-      | awk -F'\t' 'BEGIN{OFS="\t"}NR==FNR{a[$1]; next}NR>FNR && ($5 in a){$8=1} 1' overlap_genes - \
+      | awk -F'\t' 'BEGIN{OFS="\t"}FILENAME=="sr_annot"{a[$1]=$2; next}($5 in a){$7=a[$5]} 1' sr_annot - \
+      | awk -F'\t' 'BEGIN{OFS="\t"}FILENAME=="rm_annot"{a[$1]=$2; next}($5 in a){$7=a[$5]} 1' rm_annot - \
+      | awk -F'\t' 'BEGIN{OFS="\t"}FILENAME=="sd_annot"{a[$1]=$2; next}($5 in a){$7=a[$5]} 1' sd_annot - \
+      | awk -F'\t' 'BEGIN{OFS="\t"}FILENAME=="genes_annot"{a[$1]; next}($5 in a){$8=1} 1' genes_annot - \
       | cat header - \
       | gzip -c > denovo_svs-annotated.tsv.gz
   >>>
