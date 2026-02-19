@@ -22,7 +22,6 @@ endif
 .PHONY: all
 all: release
 
-.PHONY: filtergt
 filtergt: filtergt.c
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $< -lhts $(LDLIBS) -o $@
 
