@@ -259,7 +259,9 @@ workflow DeNovoSvs {
     call SubsetBincovMatrix {
       input:
         offspring_pesr_vcf = MergeOffspringSites.merged_pesr_vcf,
+        offspring_pesr_vcf_index = MergeOffspringSites.merged_pesr_vcf_index,
         offspring_depth_vcf = MergeOffspringSites.merged_depth_vcf,
+        offspring_depth_vcf_index = MergeOffspringSites.merged_depth_vcf_index,
         bincov_mat = MakeManifests.bincov_map[current_batch],
         gatk_docker = gatk_docker,
         runtime_attr_override = runtime_override_subset_bincov_matrix,
@@ -1348,7 +1350,9 @@ task SVConcordance {
 task SubsetBincovMatrix {
   input {
     File offspring_pesr_vcf
+    File offspring_pesr_vcf_index
     File offspring_depth_vcf
+    File offspring_depth_vcf_index
     String bincov_mat
     File reference_dict
     String gatk_docker
@@ -1357,7 +1361,9 @@ task SubsetBincovMatrix {
 
   parameter_meta {
     offspring_pesr_vcf: "Offspring PE/SR site VCFs merged."
+    offspring_pesr_vcf_index: "Offspring PE/SR site VCFs merged index."
     offspring_depth_vcf: "Offspring depth sites VCF."
+    offspring_depth_vcf_index: "Offspring depth sites VCF index."
     bincov_mat: "URI of binned coverage matrix."
     reference_dict: "Sequence dictionary in the form of a '.dict' file."
     gatk_docker: "Docker with GATK."
@@ -1402,7 +1408,7 @@ task SubsetBincovMatrix {
     bcftools query --include 'INFO/SVTYPE != "DEL"' \
       --format '%CHROM\t%POS0\t%INFO/SVLEN\n' \
       '~{offspring_pesr_vcf}' '~{offspring_depth_vcf}' \
-      | awk 'BEGIN{OFMT="%.0f"; OFS="\t"} {print $1,$2,$2 + 3}' \
+      | awk 'BEGIN{OFMT="%.0f"; OFS="\t"} {print $1,$2,$2 + $3}' \
       | LC_ALL=C sort -k1,1 -k2,2n > coords.bed
 
     gatk --java-options '-Xmx6G' PrintSVEvidence \
