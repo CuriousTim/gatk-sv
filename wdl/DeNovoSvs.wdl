@@ -1399,7 +1399,7 @@ task SubsetBincovMatrix {
     docker: gatk_docker
   }
 
-  String subset_bincov_name = "subset-${bincov_mat}"
+  String subset_bincov_name = "subset-${basename(bincov_mat)}"
   String subset_bincov_index_name = "${subset_bincov_name}.tbi"
 
   command <<<
