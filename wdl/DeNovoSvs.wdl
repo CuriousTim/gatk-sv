@@ -1485,9 +1485,9 @@ task NullLowDepthGenotypes {
     bcftools concat --file-list '~{write_lines(by_mother_batch_bcfs)}' \
       --output by_mother.bcf --output-type b
 
-    cut -f2,2 > offspring_targets
-    cut -f2,3 > father_targets
-    cut -f2,4 > mother_targets
+    cut -f2,2 '~{pedigree}' > offspring_targets
+    cut -f2,3 '~{pedigree}' > father_targets
+    cut -f2,4 '~{pedigree}' > mother_targets
 
     python /opt/gatk-sv/denovo/null_low_coverage_gt.py \
       by_offspring.bcf \
