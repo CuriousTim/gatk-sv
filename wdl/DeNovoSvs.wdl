@@ -1406,9 +1406,8 @@ task SubsetBincovMatrix {
     set -euxo pipefail
     
     bcftools query --include 'INFO/SVTYPE != "DEL"' \
-      --format '%CHROM\t%POS0\t%INFO/SVLEN\n' \
+      --format '%CHROM\t%POS0\t%INFO/END\n' \
       '~{offspring_pesr_vcf}' '~{offspring_depth_vcf}' \
-      | awk 'BEGIN{OFMT="%.0f"; OFS="\t"} {print $1,$2,$2 + $3}' \
       | LC_ALL=C sort -k1,1 -k2,2n > coords.bed
 
     gatk --java-options '-Xmx6G' PrintSVEvidence \
