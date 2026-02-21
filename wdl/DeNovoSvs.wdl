@@ -1485,7 +1485,7 @@ task NullLowDepthGenotypes {
     bcftools concat --file-list '~{write_lines(by_mother_batch_bcfs)}' \
       --output by_mother.bcf --output-type b
 
-    cut -f2,2 '~{pedigree}' > offspring_targets
+    awk '{print $2 "\t" $2}' ~{pedigree}' > offspring_targets
     cut -f2,3 '~{pedigree}' > father_targets
     cut -f2,4 '~{pedigree}' > mother_targets
 
