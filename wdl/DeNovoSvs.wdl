@@ -1456,8 +1456,8 @@ task NullLowDepthGenotypes {
   Float bincov_size = size(bincov_mat, "GB")
 
   RuntimeAttr default_attr = object {
-    mem_gb: 4,
-    cpu_cores: 1,
+    mem_gb: 16,
+    cpu_cores: 2,
     disk_gb: ceil(bcfs_size * 2 + bincov_size) + 32,
     boot_disk_gb: 8,
     preemptible_tries: 3,
