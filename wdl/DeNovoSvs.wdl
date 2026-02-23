@@ -1479,11 +1479,11 @@ task NullLowDepthGenotypes {
     set -euxo pipefail
     
     bcftools concat --file-list '~{write_lines(by_offspring_batch_bcfs)}' \
-     --output by_offspring.bcf --output-type b
+     --output by_offspring.bcf --output-type b --write-index=tbi
     bcftools concat --file-list '~{write_lines(by_father_batch_bcfs)}' \
-      --output by_father.bcf --output-type b
+      --output by_father.bcf --output-type b --write-index=tbi
     bcftools concat --file-list '~{write_lines(by_mother_batch_bcfs)}' \
-      --output by_mother.bcf --output-type b
+      --output by_mother.bcf --output-type b --write-index=tbi
 
     awk '{print $2 "\t" $2}' '~{pedigree}' > offspring_targets
     cut -f2,3 '~{pedigree}' > father_targets
@@ -1499,13 +1499,13 @@ task NullLowDepthGenotypes {
       by_father.bcf \
       by_father-nulled.bcf \
       '~{bincov_mat}' \
-      father_targets
+      father_targets \
       '~{min_site_depth}'
     python /opt/gatk-sv/denovo/null_low_coverage_gt.py \
       by_mother.bcf \
       by_mother-nulled.bcf \
       '~{bincov_mat}' \
-      mother_targets
+      mother_targets \
       '~{min_site_depth}'
   >>>
 }
