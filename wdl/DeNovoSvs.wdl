@@ -1603,9 +1603,9 @@ task FilterGenotypes {
     }
 
     bcftools index '~{strict_pesr_concordance_vcf}'
-    bcftools index '~{strict_depth_concordance_vcf}' \
+    bcftools index '~{strict_depth_concordance_vcf}'
     bcftools index '~{lenient_pesr_concordance_vcf}'
-    bcftools index '~{lenient_depth_concordance_vcf}' \
+    bcftools index '~{lenient_depth_concordance_vcf}'
     bcftools concat --allow-overlaps \
       '~{strict_pesr_concordance_vcf}' '~{strict_depth_concordance_vcf}' \
       --output strict_concordance.bcf --output-type b
