@@ -19,22 +19,26 @@ from pysam import TabixFile
 
 
 class RdMatReader:
-    def __init__(self, path):
+    def __init__(self, path, targets):
         self.handle = TabixFile(path)
+        self.targets = targets
         # skip the first three fields '#Chr\tStart\tEnd'
-        self.header = self.handle.header[0].lstrip("#").split("\t")[3:]
+        samples = self.handle.header[0].lstrip("#").split("\t")[3:]
+        self.indexes = [i for i, v in enumerate(samples) if v in targets]
+        self.header = [samples[i] for i in self.indexes]
 
     def fetch(self, contig, start, end):
         for rec in self.handle.fetch(contig, start, end):
-            yield RdMatReader._parse_rec(rec)
+            yield self._parse_rec(rec)
 
     def fetch_as_df(self, contig, start, end):
         return pd.DataFrame.from_records(
             self.fetch(contig, start, end), columns=self.header
         )
 
-    def _parse_rec(rec):
-        return tuple(int(x) for x in rec.split("\t")[3:])
+    def _parse_rec(self, rec):
+        fields = [int(x) for x in rec.split("\t")[3:]]
+        return tuple(fields[i] for i in self.indexes)
 
 
 def read_sample_map(path):
@@ -68,8 +72,9 @@ def filter_gt_by_coverage(inbcf, outbcf, rdmat, sample_map, min_cov):
 def main():
     inbcf = VariantFile(sys.argv[1], mode="r")
     outbcf = VariantFile(sys.argv[2], mode="w", header=inbcf.header)
-    rdmat = RdMatReader(sys.argv[3])
     sample_map = read_sample_map(sys.argv[4])
+    targets = set(sample_map[x] for x in inbcf.header.samples if x in sample_map)
+    rdmat = RdMatReader(sys.argv[3], targets)
     min_cov = int(sys.argv[5])
     filter_gt_by_coverage(inbcf, outbcf, rdmat, sample_map, min_cov)
 
