@@ -91,7 +91,7 @@ RUN --mount=type=bind,from=builder,src="/tmp/htslib-${HTSLIB_VERSION}",target=/t
   && cd /tmp/denovo && make install
 
 COPY --from=builder /usr/local/bin/duckdb /usr/local/bin/duckdb
-COPY --from=builder --chown=python:python /python /python
+COPY --from=builder /python /python
 COPY --from=builder /opt/venv /opt/venv
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
@@ -100,9 +100,6 @@ COPY src/denovo/null_low_coverage_gt.py /opt/gatk-sv/denovo/null_low_coverage_gt
 
 RUN ldconfig
 
-RUN groupadd --system --gid 999 nonroot \
- && useradd --system --gid 999 --uid 999 --create-home nonroot
-USER nonroot
 WORKDIR /tmp
 
 CMD ["bash"]
