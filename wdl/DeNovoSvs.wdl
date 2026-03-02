@@ -1695,7 +1695,7 @@ task ReformatCandidateBcfs {
     File by_offspring_batch_filtered_bcf
     File by_father_batch_filtered_bcf
     File by_mother_batch_filtered_bcf
-    File denovo_docker
+    String denovo_docker
     RuntimeAttr? runtime_attr_override
   }
 
