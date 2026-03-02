@@ -1398,7 +1398,7 @@ task ConcatOffspringContigBcfs {
   runtime {
     memory: "4 GB"
     cpu: 1
-    disks: "local-disk ${inputs_size * 2} HDD"
+    disks: "local-disk ${ceil(inputs_size * 2 + 16)} HDD"
     bootDiskSizeGb: 8
     preemptible: 3
     maxRetries: 1
