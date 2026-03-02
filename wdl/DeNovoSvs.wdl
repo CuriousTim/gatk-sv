@@ -1663,6 +1663,10 @@ task NullLowDepthGenotypes {
     cut -f2,3 '~{pedigree}' > father_targets
     cut -f2,4 '~{pedigree}' > mother_targets
 
+    bcftools index '~{by_offspring_batch_bcf}'
+    bcftools index '~{by_father_batch_bcf}'
+    bcftools index '~{by_mother_batch_bcf}'
+
     python /opt/gatk-sv/denovo/null_low_coverage_gt.py \
       '~{by_offspring_batch_bcf}' \
       '~{batch_id}-by_offspring-nulled.bcf' \
