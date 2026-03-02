@@ -1665,19 +1665,19 @@ task NullLowDepthGenotypes {
 
     python /opt/gatk-sv/denovo/null_low_coverage_gt.py \
       '~{by_offspring_batch_bcf}' \
-      by_offspring-nulled.bcf \
+      '~{batch_id}-by_offspring-nulled.bcf' \
       '~{bincov_mat}' \
       offspring_targets \
       '~{min_site_depth}'
     python /opt/gatk-sv/denovo/null_low_coverage_gt.py \
       '~{by_father_batch_bcf}' \
-      by_father-nulled.bcf \
+      '~{batch_id}-by_father-nulled.bcf' \
       '~{bincov_mat}' \
       father_targets \
       '~{min_site_depth}'
     python /opt/gatk-sv/denovo/null_low_coverage_gt.py \
       '~{by_mother_batch_bcf}' \
-      by_mother-nulled.bcf \
+      '~{batch_id}-by_mother-nulled.bcf' \
       '~{bincov_mat}' \
       mother_targets \
       '~{min_site_depth}'
