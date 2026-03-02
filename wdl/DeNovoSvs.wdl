@@ -79,6 +79,7 @@ workflow DeNovoSvs {
     RuntimeAttr? runtime_override_subset_bincov_matrix
     RuntimeAttr? runtime_override_null_low_depth_genotypes
     RuntimeAttr? runtime_override_null_batch_discordant_genotypes
+    RuntimeAttr? runtime_override_reformat_candidate_bcfs
     RuntimeAttr? runtime_override_make_denovo_calls
     RuntimeAttr? runtime_override_merge_denovo_calls
     RuntimeAttr? runtime_override_annotate_genomic_context
@@ -315,7 +316,8 @@ workflow DeNovoSvs {
         by_offspring_batch_filtered_bcf = NullLowDepthGenotypes.by_offspring_batch_nulled_bcf,
         by_father_batch_filtered_bcf = NullLowDepthGenotypes.by_father_batch_nulled_bcf,
         by_mother_batch_filtered_bcf = NullLowDepthGenotypes.by_mother_batch_nulled_bcf,
-        denovo_docker = denovo_docker
+        denovo_docker = denovo_docker,
+        runtime_attr_override = runtime_override_reformat_candidate_bcfs
     }
   }
 
