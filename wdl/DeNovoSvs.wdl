@@ -78,7 +78,7 @@ workflow DeNovoSvs {
     RuntimeAttr? runtime_override_sv_concordance
     RuntimeAttr? runtime_override_subset_bincov_matrix
     RuntimeAttr? runtime_override_null_low_depth_genotypes
-    RuntimeAttr? runtime_override_filter_genotypes
+    RuntimeAttr? runtime_override_null_batch_discordant_genotypes
     RuntimeAttr? runtime_override_make_denovo_calls
     RuntimeAttr? runtime_override_merge_denovo_calls
     RuntimeAttr? runtime_override_annotate_genomic_context
@@ -240,6 +240,15 @@ workflow DeNovoSvs {
         runtime_attr_override = runtime_override_merge_clustered_batch_vcfs
     }
 
+    call ConcatOffspringContigBcfs {
+      input:
+        batch_id = current_batch,
+        by_offspring_batch_bcfs = offspring_batch_grouped_bcfs[i],
+        by_father_batch_bcfs = father_batch_grouped_bcfs[i],
+        by_mother_batch_bcfs = mother_batch_grouped_bcfs[i],
+        denovo_docker = denovo_docker
+    }
+
     call SVConcordance {
       input:
         batch_pesr_vcf = MergeClusteredBatchVcfs.merged_pesr_vcf,
@@ -256,6 +265,24 @@ workflow DeNovoSvs {
         runtime_attr_override = runtime_override_sv_concordance
     }
 
+    call NullBatchDiscordantGenotypes {
+      input:
+        batch_id = current_batch,
+        by_offspring_batch_bcf = ConcatOffspringContigBcfs.by_offspring_batch_merged_bcf,
+        by_father_batch_bcf = ConcatOffspringContigBcfs.by_father_batch_merged_bcf,
+        by_mother_batch_bcf = ConcatOffspringContigBcfs.by_mother_batch_merged_bcf,
+        offspring_genotypes = MergeClusteredBatchVcfs.offspring_genotypes,
+        father_genotypes = MergeClusteredBatchVcfs.father_genotypes,
+        mother_genotypes = MergeClusteredBatchVcfs.mother_genotypes,
+        strict_pesr_concordance_vcf = SVConcordance.strict_pesr_concordance_vcf,
+        strict_depth_concordance_vcf = SVConcordance.strict_depth_concordance_vcf,
+        lenient_pesr_concordance_vcf = SVConcordance.lenient_pesr_concordance_vcf,
+        lenient_depth_concordance_vcf = SVConcordance.lenient_depth_concordance_vcf,
+        pedigree = SubsetSamples.ped_subset,
+        denovo_docker = denovo_docker,
+        runtime_attr_override = runtime_override_null_batch_discordant_genotypes
+    }
+
     call SubsetBincovMatrix {
       input:
         offspring_pesr_vcf = MergeOffspringSites.merged_pesr_vcf,
@@ -269,9 +296,10 @@ workflow DeNovoSvs {
 
     call NullLowDepthGenotypes {
       input:
-        by_offspring_batch_bcfs = offspring_batch_grouped_bcfs[i],
-        by_father_batch_bcfs = father_batch_grouped_bcfs[i],
-        by_mother_batch_bcfs = mother_batch_grouped_bcfs[i],
+        batch_id = current_batch,
+        by_offspring_batch_bcf = NullBatchDiscordantGenotypes.by_offspring_batch_nulled_bcf,
+        by_father_batch_bcf = NullBatchDiscordantGenotypes.by_father_batch_nulled_bcf,
+        by_mother_batch_bcf = NullBatchDiscordantGenotypes.by_mother_batch_nulled_bcf,
         bincov_mat = SubsetBincovMatrix.subset_bincov,
         bincov_mat_index = SubsetBincovMatrix.subset_bincov_index,
         pedigree = SubsetSamples.ped_subset,
@@ -280,29 +308,20 @@ workflow DeNovoSvs {
         runtime_attr_override = runtime_override_null_low_depth_genotypes 
     }
 
-    call FilterGenotypes {
+    call ReformatCandidateBcfs {
       input:
         batch_id = current_batch,
         contigs = kept_contigs,
-        by_offspring_batch_bcf = NullLowDepthGenotypes.by_offspring_batch_nulled_bcf,
-        by_father_batch_bcf = NullLowDepthGenotypes.by_father_batch_nulled_bcf,
-        by_mother_batch_bcf = NullLowDepthGenotypes.by_mother_batch_nulled_bcf,
-        offspring_genotypes = MergeClusteredBatchVcfs.offspring_genotypes,
-        father_genotypes = MergeClusteredBatchVcfs.father_genotypes,
-        mother_genotypes = MergeClusteredBatchVcfs.mother_genotypes,
-        strict_pesr_concordance_vcf = SVConcordance.strict_pesr_concordance_vcf,
-        strict_depth_concordance_vcf = SVConcordance.strict_depth_concordance_vcf,
-        lenient_pesr_concordance_vcf = SVConcordance.lenient_pesr_concordance_vcf,
-        lenient_depth_concordance_vcf = SVConcordance.lenient_depth_concordance_vcf,
-        pedigree = SubsetSamples.ped_subset,
-        denovo_docker = denovo_docker,
-        runtime_attr_override = runtime_override_filter_genotypes
+        by_offspring_batch_filtered_bcf = NullLowDepthGenotypes.by_offspring_batch_nulled_bcf,
+        by_father_batch_filtered_bcf = NullLowDepthGenotypes.by_father_batch_nulled_bcf,
+        by_mother_batch_filtered_bcf = NullLowDepthGenotypes.by_mother_batch_nulled_bcf,
+        denovo_docker = denovo_docker
     }
   }
 
-  Array[Array[File]] offspring_gt_filtered_tsvs = transpose(FilterGenotypes.self_filtered_tsvs)
-  Array[Array[File]] father_gt_filtered_tsvs = transpose(FilterGenotypes.father_filtered_tsvs)
-  Array[Array[File]] mother_gt_filtered_tsvs = transpose(FilterGenotypes.mother_filtered_tsvs)
+  Array[Array[File]] offspring_gt_filtered_tsvs = transpose(ReformatCandidateBcfs.self_filtered_tsvs)
+  Array[Array[File]] father_gt_filtered_tsvs = transpose(ReformatCandidateBcfs.father_filtered_tsvs)
+  Array[Array[File]] mother_gt_filtered_tsvs = transpose(ReformatCandidateBcfs.mother_filtered_tsvs)
 
   scatter (i in range(length(kept_contigs))) {
     call MakeDeNovoCalls {
@@ -1347,6 +1366,164 @@ task SVConcordance {
   >>>
 }
 
+task ConcatOffspringContigBcfs {
+  input {
+    String batch_id
+    Array[File] by_offspring_batch_bcfs
+    Array[File] by_father_batch_bcfs
+    Array[File] by_mother_batch_bcfs
+    String denovo_docker
+  }
+
+  parameter_meta {
+    batch_id: "Batch ID."
+    by_offspring_batch_bcfs: "Cohort BCF subset to offspring in the `batch_id` batch, split by contig."
+    by_father_batch_bcfs: "Cohort BCF subset to offspring with fathers in the `batch_id` batch, split by contig."
+    by_mother_batch_bcfs: "Cohort BCF subset to offspring with mothers in the `batch_id` batch, split by contig."
+    denovo_docker: "The corresponding Docker image from GATK-SV."
+  }
+
+  output {
+    File by_offspring_batch_merged_bcf = "${batch_id}-by_offspring.bcf"
+    File by_father_batch_merged_bcf = "${batch_id}-by_father.bcf"
+    File by_mother_batch_merged_bcf = "${batch_id}-by_mother.bcf"
+  }
+
+  Float inputs_size = size(by_offspring_batch_bcfs, "GB")
+    + size(by_father_batch_bcfs, "GB")
+    + size(by_mother_batch_bcfs, "GB")
+
+  runtime {
+    memory: "4 GB"
+    cpu: 1
+    disks: "local-disk ${inputs_size * 2} HDD"
+    bootDiskSizeGb: 8
+    preemptible: 3
+    maxRetries: 1
+    docker: denovo_docker
+  }
+
+  command <<<
+    set -euxo pipefail
+
+    bcftools concat --file-list '~{write_lines(by_offspring_batch_bcfs)}' \
+     --output '~{batch_id}-by_offspring.bcf' --output-type b --write-index
+    bcftools concat --file-list '~{write_lines(by_father_batch_bcfs)}' \
+      --output '~{batch_id}-by_father.bcf' --output-type b --write-index
+    bcftools concat --file-list '~{write_lines(by_mother_batch_bcfs)}' \
+      --output '~{batch_id}-by_mother.bcf' --output-type b --write-index
+  >>>
+}
+
+task NullBatchDiscordantGenotypes {
+  input {
+    String batch_id
+    File by_offspring_batch_bcf
+    File by_father_batch_bcf
+    File by_mother_batch_bcf
+    File offspring_genotypes
+    File father_genotypes
+    File mother_genotypes
+    File strict_pesr_concordance_vcf
+    File strict_depth_concordance_vcf
+    File lenient_pesr_concordance_vcf
+    File lenient_depth_concordance_vcf
+    File pedigree
+    String denovo_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  parameter_meta {
+    batch_id: "Batch ID."
+    by_offspring_batch_bcf: "Cohort BCF subset to offspring in the `batch_id` batch."
+    by_father_batch_bcf: "Cohort BCF subset to offspring with fathers in the `batch_id` batch."
+    by_mother_batch_bcf: "Cohort BCF subset to offspring with mothers in the `batch_id` batch."
+    offspring_genotypes: "Offspring genotypes from the MergeClusteredBatchVcfs."
+    father_genotypes: "Father genotypes from the MergeClusteredBatchVcfs."
+    mother_genotypes: "Mother genotypes from the MergeClusteredBatchVcfs."
+    strict_pesr_concordance_vcf: "SVConcordance VCF between offspring PE/SR sites and ClusterBatch PE/SR sites with strict parameters."
+    strict_depth_concordance_vcf: "SVConcordance VCF between offspring depth sites and ClusterBatch depth sites with strict parameters."
+    lenient_pesr_concordance_vcf: "SVConcordance VCF between offspring PE/SR sites and ClusterBatch PE/SR sites with lenient parameters."
+    lenient_depth_concordance_vcf: "SVConcordance VCF between offspring depth sites and ClusterBatch depth sites with lenient parameters."
+    pedigree: "Cohort pedigree."
+    denovo_docker: "The corresponding Docker image from GATK-SV."
+    runtime_attr_override: "Runtime attribute overrides."
+  }
+
+  output {
+    File by_offspring_batch_nulled_bcf = "${batch_id}-by_offspring-nulled.bcf"
+    File by_father_batch_nulled_bcf = "${batch_id}-by_father-nulled.bcf"
+    File by_mother_batch_nulled_bcf = "${batch_id}-by_mother-nulled.bcf"
+  }
+
+  Float disk_size = size(by_offspring_batch_bcf, "GB")
+    + size(by_father_batch_bcf, "GB")
+    + size(by_mother_batch_bcf, "GB")
+    + size(offspring_genotypes, "GB")
+    + size(father_genotypes, "GB")
+    + size(mother_genotypes, "GB")
+    + size(strict_pesr_concordance_vcf, "GB")
+    + size(strict_depth_concordance_vcf, "GB")
+    + size(lenient_pesr_concordance_vcf, "GB")
+    + size(lenient_depth_concordance_vcf, "GB")
+
+  RuntimeAttr default_attr = object {
+    mem_gb: 4,
+    cpu_cores: 1,
+    disk_gb: ceil(disk_size * 3) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: "${select_first([runtime_attr.mem_gb, default_attr.mem_gb])} GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk ${select_first([runtime_attr.disk_gb, default_attr.disk_gb])} HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: denovo_docker
+  }
+
+  command <<<
+    set -euxo pipefail
+
+    bcftools index '~{strict_pesr_concordance_vcf}'
+    bcftools index '~{strict_depth_concordance_vcf}'
+    bcftools index '~{lenient_pesr_concordance_vcf}'
+    bcftools index '~{lenient_depth_concordance_vcf}'
+    bcftools concat --allow-overlaps \
+      '~{strict_pesr_concordance_vcf}' '~{strict_depth_concordance_vcf}' \
+      --output strict_concordance.bcf --output-type b
+    bcftools concat --allow-overlaps \
+      '~{lenient_pesr_concordance_vcf}' '~{lenient_depth_concordance_vcf}' \
+      --output lenient_concordance.bcf --output-type b
+
+    filtergt '~{by_offspring_batch_bcf}' strict_concordance.bcf \
+      '~{offspring_genotypes}' \
+      'self_filtered.bcf'
+    cut -f2,3 '~{pedigree}' > fathers.tsv
+    filtergt '~{by_father_batch_bcf}' lenient_concordance.bcf \
+      '~{father_genotypes}' \
+      'father_filtered.bcf' \
+      fathers.tsv
+    cut -f2,4 '~{pedigree}' > mothers.tsv
+    filtergt '~{by_mother_batch_bcf}' lenient_concordance.bcf \
+      '~{mother_genotypes}' \
+      'mother_filtered.bcf' \
+      mothers.tsv
+
+    bcftools view --exclude 'COUNT(GT="alt")=0' --output-type b \
+      --output '~{batch_id}-by_offspring-nulled.bcf' self_filtered.bcf
+    bcftools view --exclude 'COUNT(GT="alt")=0' --output-type b \
+      --output '~{batch_id}-by_father-nulled.bcf' father_filtered.bcf
+    bcftools view --exclude 'COUNT(GT="alt")=0' --output-type b \
+      --output '~{batch_id}-by_mother-nulled.bcf' mother_filtered.bcf
+  >>>
+}
+
 task SubsetBincovMatrix {
   input {
     File offspring_pesr_vcf
@@ -1421,9 +1598,10 @@ task SubsetBincovMatrix {
 
 task NullLowDepthGenotypes {
   input {
-    Array[File] by_offspring_batch_bcfs
-    Array[File] by_father_batch_bcfs
-    Array[File] by_mother_batch_bcfs
+    String batch_id
+    File by_offspring_batch_bcf
+    File by_father_batch_bcf
+    File by_mother_batch_bcf
     File bincov_mat
     File bincov_mat_index
     File pedigree
@@ -1433,9 +1611,10 @@ task NullLowDepthGenotypes {
   }
 
   parameter_meta {
-    by_offspring_batch_bcfs: "Offsprings BCFs grouped by offspring batch, split by contig."
-    by_father_batch_bcfs: "Offspring BCFs grouped by father batch, split by contig."
-    by_mother_batch_bcfs: "Offspring BCFs grouped by mother batch, split by contig."
+    batch_id: "Batch ID."
+    by_offspring_batch_bcf: "Cohort BCF subset to offspring in the `batch_id` batch."
+    by_father_batch_bcf: "Cohort BCF subset to offspring with fathers in the `batch_id` batch."
+    by_mother_batch_bcf: "Cohort BCF subset to offspring with mothers in the `batch_id` batch."
     bincov_mat: "Binned coverage matrix of batch."
     bincov_mat_index: "Binned coverage matrix index of batch."
     pedigree: "Pedigree in PED format."
@@ -1445,14 +1624,14 @@ task NullLowDepthGenotypes {
   }
 
   output {
-    File by_offspring_batch_nulled_bcf = "by_offspring-nulled.bcf"
-    File by_father_batch_nulled_bcf = "by_father-nulled.bcf"
-    File by_mother_batch_nulled_bcf = "by_mother-nulled.bcf"
+    File by_offspring_batch_nulled_bcf = "${batch_id}-by_offspring-nulled.bcf"
+    File by_father_batch_nulled_bcf = "${batch_id}-by_father-nulled.bcf"
+    File by_mother_batch_nulled_bcf = "${batch_id}-by_mother-nulled.bcf"
   }
 
-  Float bcfs_size = size(by_offspring_batch_bcfs, "GB") +
-    size(by_father_batch_bcfs, "GB") +
-    size(by_mother_batch_bcfs, "GB")
+  Float bcfs_size = size(by_offspring_batch_bcf, "GB") +
+    size(by_father_batch_bcf, "GB") +
+    size(by_mother_batch_bcf, "GB")
   Float bincov_size = size(bincov_mat, "GB")
 
   RuntimeAttr default_attr = object {
@@ -1478,13 +1657,6 @@ task NullLowDepthGenotypes {
   command <<<
     set -euxo pipefail
     
-    bcftools concat --file-list '~{write_lines(by_offspring_batch_bcfs)}' \
-     --output by_offspring.bcf --output-type b --write-index=tbi
-    bcftools concat --file-list '~{write_lines(by_father_batch_bcfs)}' \
-      --output by_father.bcf --output-type b --write-index=tbi
-    bcftools concat --file-list '~{write_lines(by_mother_batch_bcfs)}' \
-      --output by_mother.bcf --output-type b --write-index=tbi
-
     awk '{print $2 "\t" $2}' '~{pedigree}' > offspring_targets
     cut -f2,3 '~{pedigree}' > father_targets
     cut -f2,4 '~{pedigree}' > mother_targets
@@ -1510,40 +1682,23 @@ task NullLowDepthGenotypes {
   >>>
 }
 
-# Filter genotypes per batch
-task FilterGenotypes {
+task ReformatCandidateBcfs {
   input {
     String batch_id
     Array[String]+ contigs
-    File by_offspring_batch_bcf
-    File by_father_batch_bcf
-    File by_mother_batch_bcf
-    File offspring_genotypes
-    File father_genotypes
-    File mother_genotypes
-    File strict_pesr_concordance_vcf
-    File strict_depth_concordance_vcf
-    File lenient_pesr_concordance_vcf
-    File lenient_depth_concordance_vcf
-    File pedigree
-    String denovo_docker
+    File by_offspring_batch_filtered_bcf
+    File by_father_batch_filtered_bcf
+    File by_mother_batch_filtered_bcf
+    File denovo_docker
     RuntimeAttr? runtime_attr_override
   }
 
   parameter_meta {
     batch_id: "Batch ID of this batch."
     contigs: "Contigs to keep."
-    by_offspring_batch_bcf: "Offsprings BCFs grouped by offspring batch."
-    by_father_batch_bcf: "Offspring BCFs grouped by father batch."
-    by_mother_batch_bcf: "Offspring BCFs grouped by mother batch."
-    offspring_genotypes: "Offspring genotypes from the MergeClusteredBatchVcfs."
-    father_genotypes: "Father genotypes from the MergeClusteredBatchVcfs."
-    mother_genotypes: "Mother genotypes from the MergeClusteredBatchVcfs."
-    strict_pesr_concordance_vcf: "SVConcordance VCF between offspring PE/SR sites and ClusterBatch PE/SR sites with strict parameters."
-    strict_depth_concordance_vcf: "SVConcordance VCF between offspring depth sites and ClusterBatch depth sites with strict parameters."
-    lenient_pesr_concordance_vcf: "SVConcordance VCF between offspring PE/SR sites and ClusterBatch PE/SR sites with lenient parameters."
-    lenient_depth_concordance_vcf: "SVConcordance VCF between offspring depth sites and ClusterBatch depth sites with lenient parameters."
-    pedigree: "Cohort pedigree."
+    by_offspring_batch_filtered_bcf: "BCF of offspring SVs filtered against offspring's batch calls."
+    by_father_batch_filtered_bcf: "BCF of offspring SVs filtered against father's batch calls."
+    by_mother_batch_filtered_bcf: "BCF of offspring SVs filtered against mother's batch calls."
     denovo_docker: "The corresponding Docker image from GATK-SV."
     runtime_attr_override: "Runtime attribute overrides."
   }
@@ -1554,21 +1709,14 @@ task FilterGenotypes {
     Array[File] mother_filtered_tsvs = glob("mother/*.tsv.gz")
   }
 
-  Float disk_size = size(by_offspring_batch_bcf, "GB")
-    + size(by_father_batch_bcf, "GB")
-    + size(by_mother_batch_bcf, "GB")
-    + size(offspring_genotypes, "GB")
-    + size(father_genotypes, "GB")
-    + size(mother_genotypes, "GB")
-    + size(strict_pesr_concordance_vcf, "GB")
-    + size(strict_depth_concordance_vcf, "GB")
-    + size(lenient_pesr_concordance_vcf, "GB")
-    + size(lenient_depth_concordance_vcf, "GB")
+  Float disk_size = size(by_offspring_batch_filtered_bcf, "GB")
+    + size(by_father_batch_filtered_bcf, "GB")
+    + size(by_mother_batch_filtered_bcf, "GB")
 
   RuntimeAttr default_attr = object {
     mem_gb: 4,
     cpu_cores: 1,
-    disk_gb: ceil(disk_size * 3) + 16,
+    disk_gb: ceil(disk_size * 2) + 16,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
@@ -1602,44 +1750,19 @@ task FilterGenotypes {
       }' dir="$1" bid='~{batch_id}' '~{write_lines(contigs)}' -
     }
 
-    bcftools index '~{strict_pesr_concordance_vcf}'
-    bcftools index '~{strict_depth_concordance_vcf}'
-    bcftools index '~{lenient_pesr_concordance_vcf}'
-    bcftools index '~{lenient_depth_concordance_vcf}'
-    bcftools concat --allow-overlaps \
-      '~{strict_pesr_concordance_vcf}' '~{strict_depth_concordance_vcf}' \
-      --output strict_concordance.bcf --output-type b
-    bcftools concat --allow-overlaps \
-      '~{lenient_pesr_concordance_vcf}' '~{lenient_depth_concordance_vcf}' \
-      --output lenient_concordance.bcf --output-type b
-
-    filtergt '~{by_offspring_batch_bcf}' strict_concordance.bcf \
-      '~{offspring_genotypes}' \
-      'self_filtered.bcf'
-    cut -f2,3 '~{pedigree}' > fathers.tsv
-    filtergt '~{by_father_batch_bcf}' lenient_concordance.bcf \
-      '~{father_genotypes}' \
-      'father_filtered.bcf' \
-      fathers.tsv
-    cut -f2,4 '~{pedigree}' > mothers.tsv
-    filtergt '~{by_mother_batch_bcf}' lenient_concordance.bcf \
-      '~{mother_genotypes}' \
-      'mother_filtered.bcf' \
-      mothers.tsv
-
     mkdir offspring father mother
 
     bcftools query --include 'GT == "alt"' \
       --format '[%CHROM\t%POS\t%INFO/END\t%INFO/SVLEN\t%ID\t%INFO/SVTYPE\t%SAMPLE\n]' \
-      self_filtered.bcf \
+      '~{by_offspring_batch_filtered_bcf}' \
       | write_gts offspring
     bcftools query --include 'GT == "alt"' \
       --format '[%CHROM\t%POS\t%INFO/END\t%INFO/SVLEN\t%ID\t%INFO/SVTYPE\t%SAMPLE\n]' \
-      father_filtered.bcf\
+      '~{by_father_batch_filtered_bcf}' \
       | write_gts father
     bcftools query --include 'GT == "alt"' \
       --format '[%CHROM\t%POS\t%INFO/END\t%INFO/SVLEN\t%ID\t%INFO/SVTYPE\t%SAMPLE\n]' \
-      mother_filtered.bcf \
+      '~{by_mother_batch_filtered_bcf}' \
       | write_gts mother
   >>>
 }
