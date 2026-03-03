@@ -27,6 +27,11 @@ workflow DeNovoSvs {
     # Exclude genomic disorder regions (useful if these have already been reviewed)
     File? genomic_disorders_bed
 
+    # IQR multiplier for site de novo count outlier determination
+    Int site_iqr_mult
+    # IQR multiplier for sample de novo count outlier determination
+    Int sample_iqr_mult
+
     # Either a single VCF or an array of VCFs with each one containing a single
     # contig. In the case of a single VCF, it is expected that all the contigs
     # in the input contigs are present. In the case of multiple VCFs, all VCFs
@@ -83,10 +88,11 @@ workflow DeNovoSvs {
     RuntimeAttr? runtime_override_make_denovo_calls
     RuntimeAttr? runtime_override_merge_denovo_calls
     RuntimeAttr? runtime_override_annotate_genomic_context
+    RuntimeAttr? runtime_override_flag_outliers
   }
 
   output {
-    File merged_denovos = AnnotateGenomicContext.annotated_denovos
+    File denovos = FlagOutliers.flagged_callset
   }
 
   call MakeManifests {
@@ -353,6 +359,15 @@ workflow DeNovoSvs {
       pc_genes = protein_coding_genes_bed,
       sv_base_mini_docker = sv_base_mini_docker,
       runtime_attr_override = runtime_override_annotate_genomic_context
+  }
+
+  call FlagOutliers {
+    input:
+      denovos = AnnotateGenomicContext.annotated_denovos,
+      site_iqr_mult = site_iqr_mult,
+      sample_iqr_mult = sample_iqr_mult,
+      sv_base_mini_docker = sv_base_mini_docker,
+      runtime_attr_override = runtime_override_flag_outliers
   }
 }
 
@@ -1962,5 +1977,77 @@ task AnnotateGenomicContext {
       | awk -F'\t' 'BEGIN{OFS="\t"}FILENAME=="genes_annot"{a[$1]; next}($5 in a){$8=1} 1' genes_annot - \
       | cat header - \
       | gzip -c > denovo_svs-annotated.tsv.gz
+  >>>
+}
+
+task FlagOutliers {
+  input {
+    File denovos
+    Int site_iqr_mult
+    Int sample_iqr_mult
+    String sv_base_mini_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  parameter_meta {
+    denovos: "TSV with de novo calls."
+    site_iqr_mult: "Site IQR multiplier to define maximum number of de novo calls per site."
+    sample_iqr_mult: "Sample IQR multiplier to define maximum number of de novo calls per sample."
+    sv_base_mini_docker: "The corresponding Docker image from GATK-SV."
+    runtime_attr_override: "Runtime attribute overrides."
+  }
+
+  output {
+    File flagged_callset = "denovo_svs-outliers_flagged.tsv.gz"
+  }
+
+  Float disk_size = size(denovos, "GB") * 2
+
+  RuntimeAttr default_attr = object {
+    mem_gb: 4,
+    cpu_cores: 1,
+    disk_gb: ceil(disk_size) + 16,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: "${select_first([runtime_attr.mem_gb, default_attr.mem_gb])} GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk ${select_first([runtime_attr.disk_gb, default_attr.disk_gb])} HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: sv_base_mini_docker
+  }
+
+  command <<<
+    set -euxo pipefail
+
+    cat > temp.R <<'EOF'
+      argv <- commandArgs(trailingOnly = TRUE)
+      site_iqr_mult <- as.integer(argv[[2]])
+      sample_iqr_mult <- as.integer(argv[[3]])
+      dn <- read.table(argv[[1]], sep = "\t", header = TRUE)
+      dn_per_site <- table(dn$name)
+      dn_per_site_iqr <- IQR(dn_per_site)
+      dn_per_site_iqr <- if (dn_per_site_iqr == 0) 1 else dn_per_site_iqr
+      dn_per_sample <- table(dn$sample)
+      dn_per_sample_iqr <- IQR(dn_per_sample)
+      dn_per_sample_iqr <- if (dn_per_sample_iqr == 0) 1 else dn_per_sample_iqr
+      max_dn_per_site <- median(dn_per_site) + dn_per_site_iqr * site_iqr_mult
+      max_dn_per_sample <- median(dn_per_sample) + dn_per_sample_iqr * sample_iqr_mult
+      outlier_sites <- names(dn_per_site[dn_per_site > max_dn_per_site])
+      outlier_samples <- names(dn_per_sample[dn_per_sample > max_dn_per_sample])
+      dn$outlier_site <- dn$name %in% outlier_sites
+      dn$outlier_sample <- dn$sample %in% outlier_samples
+      dn[dn$outlier_site | dn$outlier_sample, "is_de_novo"] <- FALSE
+      con <- gzfile("denovo_svs-outliers_flagged.tsv.gz", open = "wb")
+      write.table(dn, con, quote = FALSE, sep = "\t", row.names = FALSE)
+      close(con)
+EOF
+    Rscript temp.R '~{denovos}' ~{site_iqr_mult} ~{sample_iqr_mult}
   >>>
 }
