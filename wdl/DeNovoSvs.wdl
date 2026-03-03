@@ -94,7 +94,7 @@ workflow DeNovoSvs {
 
   output {
     File denovos = FlagOutliers.flagged_callset
-    File removed_sites = merged_removed_sites.merged_tsv
+    File removed_sites = merge_removed_sites.merged_tsv
   }
 
   call MakeManifests {
@@ -188,7 +188,7 @@ workflow DeNovoSvs {
     }
   }
 
-  call MergeTsvsWithHeader as merged_removed_sites {
+  call MergeTsvsWithHeader as merge_removed_sites {
     input:
       tsvs = FilterOffspringSites.removed_sites,
       merged_file_prefix = "removed_sites",
