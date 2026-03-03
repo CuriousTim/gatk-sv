@@ -995,7 +995,7 @@ task FilterOffspringSites {
 
     cat large_sv_fail \
       gd_fail \
-      cohort_af_fail
+      cohort_af_fail \
       gnomad_af_fail \
       bothsides_fail \
       depth_only_fail \
