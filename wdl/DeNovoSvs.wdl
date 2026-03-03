@@ -87,13 +87,14 @@ workflow DeNovoSvs {
     RuntimeAttr? runtime_override_null_batch_discordant_genotypes
     RuntimeAttr? runtime_override_reformat_candidate_bcfs
     RuntimeAttr? runtime_override_make_denovo_calls
-    RuntimeAttr? runtime_override_merge_denovo_calls
+    RuntimeAttr? runtime_override_merge_tsvs_with_header
     RuntimeAttr? runtime_override_annotate_genomic_context
     RuntimeAttr? runtime_override_flag_outliers
   }
 
   output {
     File denovos = FlagOutliers.flagged_callset
+    File removed_sites = merged_removed_sites.merged_tsv
   }
 
   call MakeManifests {
@@ -185,6 +186,14 @@ workflow DeNovoSvs {
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_match_bcf_to_contig
     }
+  }
+
+  call MergeTsvsWithHeader as merged_removed_sites {
+    input:
+      tsvs = FilterOffspringSites.removed_sites,
+      merged_file_prefix = "removed_sites",
+      linux_docker = linux_docker,
+      runtime_attr_override = runtime_override_merge_tsvs_with_header
   }
 
   Array[File] by_offspring_batch = GroupOffspringByBatch.by_offspring
@@ -344,16 +353,17 @@ workflow DeNovoSvs {
     }
   }
 
-  call MergeDeNovoCalls {
+  call MergeTsvsWithHeader as merge_denovos {
     input:
-      denovos = MakeDeNovoCalls.denovos_tsv,
+      tsvs = MakeDeNovoCalls.denovos_tsv,
+      merged_file_prefix = "denovos",
       linux_docker = linux_docker,
-      runtime_attr_override = runtime_override_merge_denovo_calls
+      runtime_attr_override = runtime_override_merge_tsvs_with_header
   }
 
   call AnnotateGenomicContext {
     input:
-      denovos = MergeDeNovoCalls.merged_denovos,
+      denovos = merge_denovos.merged_tsv,
       rm = repeatmaster_bed,
       sr = simple_repeat_bed,
       sd = segdup_bed,
@@ -879,6 +889,7 @@ task FilterOffspringSites {
 
   output {
     File filtered_bcf = filtered_bcf_name
+    File removed_sites = "removed_sites.tsv.gz"
   }
 
   Float bcf_size = size(bcf, "GB")
@@ -917,14 +928,18 @@ task FilterOffspringSites {
       fi
     }
 
-    bcftools view --drop-genotypes --output-type b --output sites_only.bcf '~{bcf}'
-    bcftools query \
-      --include 'AF > ~{max_cohort_af} || (gnomad_v4.1_sv_AF != "." && gnomad_v4.1_sv_AF > ~{max_gnomad_af})' \
-      --format '%ID\n' \
-      sites_only.bcf > af_fail
+    records_fmt='%CHROM\t%POS\t%INFO/END\t%INFO/SVLEN\t%ID\n'
 
+    bcftools view --drop-genotypes --output-type b --output sites_only.bcf '~{bcf}'
+    bcftools query --include 'AF > ~{max_cohort_af}' --format "${records_fmt}" sites_only.bcf \
+      | awk -F'\t' '{print $0 "\tcohort_AF"}' > cohort_af_fail
+    bcftools query --include 'gnomad_v4.1_sv_AF != "." && gnomad_v4.1_sv_AF > ~{max_gnomad_af}' --format "${records_fmt}" sites_only.bcf \
+      | awk -F'\t' '{print $0 "\tgnomAD_AF"}' > gnomad_af_fail
+
+    : > large_sv_fail
     if [[ '~{true=1 false=0 remove_large_svs}' = 1 ]]; then
-      bcftools query --include 'SVLEN >= 1000000' --format '%ID\n' sites_only.bcf > large_sv_fail
+      bcftools query --include 'SVLEN >= 1000000' --format "${records_fmt}" sites_only.bcf \
+        | awk -F'\t' '{print $0 "\tlarge_SV"}' > large_sv_fail
     fi
 
     bcftools head sites_only.bcf | grep '^##' > headers.txt
@@ -949,17 +964,17 @@ task FilterOffspringSites {
     fi
     bcftools view \
       --include '(SVTYPE = "DEL" || SVTYPE = "DUP") && (EVIDENCE ~ "^RD,SR$" || EVIDENCE = "SR") && SVLEN < ~{large_cnv_size}' \
-      --output-type u \
-      sites_only.bcf \
-      | bcftools query --exclude "${bothsides_filter}" --format '%ID\n' > bothsides_fail
+      --output-type u sites_only.bcf \
+      | bcftools query --exclude "${bothsides_filter}" --format "${records_fmt}" \
+      | awk -F'\t' '{print $0 "\tsmall_sr_cnv"}' > bothsides_fail
     bcftools query \
       --include 'SVTYPE = "DUP" && ALGORITHMS = "depth" && SVLEN < ~{depth_only_size}' \
-      --format '%ID\n' \
-      sites_only.bcf > depth_only_fail
-    bcftools query --include "${high_sr_filter}" --format '%ID\n' \
-      sites_only.bcf > high_sr_fail
+      --format "${records_fmt}" sites_only.bcf \
+      | awk -F'\t' '{print $0 "\tsmall_depth_only_dup"}' > depth_only_fail
+    bcftools query --include "${high_sr_filter}" --format "${records_fmt}" sites_only.bcf \
+      | awk -F'\t' '{print $0 "\thigh_sr_background"}' > high_sr_fail
 
-    bcftools query --format '%CHROM\t%POS0\t%END\t%ID\n' sites_only.bcf > sites.bed
+    bcftools query --format "${records_fmt}" sites_only.bcf > sites.bed
     : > exclude_regions_fail
     er_paths='~{if defined(exclude_regions) then write_lines(select_first([exclude_regions])) else ""}'
     if [[ -n "${er_paths:-}" ]]; then
@@ -967,27 +982,27 @@ task FilterOffspringSites {
         | LC_ALL=C sort -k1,1 -k2,2n > er_merged.bed
 
       bedtools coverage -a sites.bed -b er_merged.bed -sorted \
-        | awk -F'\t' '$8 >= ovp {print $4}' ovp=~{exclude_regions_ovp} >> exclude_regions_fail
+        | awk -F'\t' 'BEGIN{OFS="\t"} $9 >= ovp {print $1,$2,$3,$4,$5,"blacklist"}' ovp=~{exclude_regions_ovp} >> exclude_regions_fail
     fi
 
     gd_bed_path='~{if defined(genomic_disorders_bed) then select_first([genomic_disorders_bed]) else ""}'
+    : > gd_fail
     if [[ -n "${gd_bed_path:-}" ]]; then
-      bcftools query --include 'SVTYPE = "DEL" || SVTYPE = "DUP"' --format '%CHROM\t%POS0\t%END\t%ID\n' sites_only.bcf > cnvs.bed
+      bcftools query --include 'SVTYPE = "DEL" || SVTYPE = "DUP"' --format "${records_fmt}" sites_only.bcf > cnvs.bed
       bedtools intersect -a cnvs.bed -b "${gd_bed_path}" -r -f 0.5 -u \
-        | cut -f 4 > gd_fail
+        | awk -F'\t' '{print $0 "\tgenomic_disorder"}' > gd_fail
     fi
 
-    : > optional_fail
-    cat large_sv_fail || true >> optional_fail
-    cat gd_fail || true >> optional_fail
-
-    cat optional_fail \
-      af_fail \
+    cat large_sv_fail \
+      gd_fail \
+      cohort_af_fail
+      gnomad_af_fail \
       bothsides_fail \
       depth_only_fail \
       high_sr_fail \
-      exclude_regions_fail \
-      | sort -u > blacklist
+      exclude_regions_fail > removed_sites.tsv
+    cut -f 5 removed_sites.tsv | sort -u > blacklist
+    gzip removed_sites.tsv
 
     bcftools view --exclude 'ID = @blacklist' --output-type u \
       --output '~{filtered_bcf_name}' '~{bcf}'
@@ -1857,24 +1872,26 @@ task MakeDeNovoCalls {
   >>>
 }
 
-task MergeDeNovoCalls {
+task MergeTsvsWithHeader {
   input {
-    Array[File]+ denovos
+    Array[File]+ tsvs
+    String merged_file_prefix
     String linux_docker
     RuntimeAttr? runtime_attr_override
   }
 
   parameter_meta {
-    denovos: "TSVs with de novo calls."
+    tsvs: "Compressed TSVs, each with the same columns and a header."
+    merged_file_prefix: "Prefix for the merged file."
     linux_docker: "The corresponding Docker image from GATK-SV."
     runtime_attr_override: "Runtime attribute overrides."
   }
 
   output {
-    File merged_denovos  = "denovo_svs.tsv.gz"
+    File merged_tsv = "${merged_file_prefix}.tsv.gz"
   }
 
-  Float disk_size = size(denovos, "GB")
+  Float disk_size = size(tsvs, "GB")
 
   RuntimeAttr default_attr = object {
     mem_gb: 4,
@@ -1899,11 +1916,11 @@ task MergeDeNovoCalls {
   command <<<
     set -euxo pipefail
 
-    manifest='~{write_lines(denovos)}'
-    cp "$(head -n 1 "${manifest}")" 'denovo_svs.tsv.gz'
+    manifest='~{write_lines(tsvs)}'
+    cp "$(head -n 1 "${manifest}")" '~{merged_file_prefix}.tsv.gz'
     awk 'NR>1' "${manifest}" \
       | while read -r f; do gzip -cd "${f}" | awk 'NR>1'; done \
-      | gzip -c >> 'denovo_svs.tsv.gz'
+      | gzip -c >> '~{merged_file_prefix}.tsv.gz'
   >>>
 }
 
