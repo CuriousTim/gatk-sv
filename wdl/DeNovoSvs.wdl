@@ -65,6 +65,7 @@ workflow DeNovoSvs {
     # Dockers
     String linux_docker
     String sv_base_mini_docker
+    String sv_base_docker
     String svconcordance_keep_all_docker
     String gatk_docker
     String denovo_docker
@@ -366,7 +367,7 @@ workflow DeNovoSvs {
       denovos = AnnotateGenomicContext.annotated_denovos,
       site_iqr_mult = site_iqr_mult,
       sample_iqr_mult = sample_iqr_mult,
-      sv_base_mini_docker = sv_base_mini_docker,
+      sv_base_docker = sv_base_docker,
       runtime_attr_override = runtime_override_flag_outliers
   }
 }
@@ -1985,7 +1986,7 @@ task FlagOutliers {
     File denovos
     Int site_iqr_mult
     Int sample_iqr_mult
-    String sv_base_mini_docker
+    String sv_base_docker
     RuntimeAttr? runtime_attr_override
   }
 
@@ -1993,7 +1994,7 @@ task FlagOutliers {
     denovos: "TSV with de novo calls."
     site_iqr_mult: "Site IQR multiplier to define maximum number of de novo calls per site."
     sample_iqr_mult: "Sample IQR multiplier to define maximum number of de novo calls per sample."
-    sv_base_mini_docker: "The corresponding Docker image from GATK-SV."
+    sv_base_docker: "The corresponding Docker image from GATK-SV."
     runtime_attr_override: "Runtime attribute overrides."
   }
 
@@ -2020,7 +2021,7 @@ task FlagOutliers {
     bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
     preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
     maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: sv_base_mini_docker
+    docker: sv_base_docker
   }
 
   command <<<
