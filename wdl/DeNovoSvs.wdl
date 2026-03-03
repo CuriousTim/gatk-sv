@@ -28,9 +28,9 @@ workflow DeNovoSvs {
     File? genomic_disorders_bed
 
     # IQR multiplier for site de novo count outlier determination
-    Int site_iqr_mult
+    Int site_iqr_mult = 3
     # IQR multiplier for sample de novo count outlier determination
-    Int sample_iqr_mult
+    Int sample_iqr_mult = 3
 
     # Either a single VCF or an array of VCFs with each one containing a single
     # contig. In the case of a single VCF, it is expected that all the contigs
