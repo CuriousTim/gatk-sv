@@ -928,7 +928,7 @@ task FilterOffspringSites {
       fi
     }
 
-    records_fmt='%CHROM\t%POS\t%INFO/END\t%INFO/SVLEN\t%ID\n'
+    records_fmt='%CHROM\t%POS\t%INFO/END\t%INFO/SVTYPE\t%INFO/SVLEN\t%ID\n'
 
     bcftools view --drop-genotypes --output-type b --output sites_only.bcf '~{bcf}'
     bcftools query --include 'AF > ~{max_cohort_af}' --format "${records_fmt}" sites_only.bcf \
@@ -982,7 +982,7 @@ task FilterOffspringSites {
         | LC_ALL=C sort -k1,1 -k2,2n > er_merged.bed
 
       bedtools coverage -a sites.bed -b er_merged.bed -sorted \
-        | awk -F'\t' 'BEGIN{OFS="\t"} $9 >= ovp {print $1,$2,$3,$4,$5,"blacklist"}' ovp=~{exclude_regions_ovp} >> exclude_regions_fail
+        | awk -F'\t' 'BEGIN{OFS="\t"} $10 >= ovp {print $1,$2,$3,$4,$5,$6,"blacklist"}' ovp=~{exclude_regions_ovp} >> exclude_regions_fail
     fi
 
     gd_bed_path='~{if defined(genomic_disorders_bed) then select_first([genomic_disorders_bed]) else ""}'
@@ -1001,7 +1001,7 @@ task FilterOffspringSites {
       depth_only_fail \
       high_sr_fail \
       exclude_regions_fail > removed_sites.tsv
-    cut -f 5 removed_sites.tsv | sort -u > blacklist
+    cut -f 6 removed_sites.tsv | sort -u > blacklist
     gzip removed_sites.tsv
 
     bcftools view --exclude 'ID = @blacklist' --output-type u \
