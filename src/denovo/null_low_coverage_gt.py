@@ -1,16 +1,5 @@
-"""
-Set BCF genotypes to null where samples have low coverage.
-
-Usage: python3 null_low_coverage_gt.py <inbcf> <outbcf> <bincov> <targets> <mincov>
-
-<inbcf>    VCF/BCF to check.
-<outbcf>   Where to write the modified VCF/BCF.
-<bincov>   Binned coverage matrix. Must be indexed.
-<targets>  TSV with sample to modify in first column, sample whose coverage
-           should be checked in the second column.
-<mincov>   Minimum median coverage of region for a genotype to be kept.
-"""
-
+import argparse
+from pathlib import Path
 import sys
 
 import pandas as pd
@@ -20,7 +9,7 @@ from pysam import TabixFile
 
 class RdMatReader:
     def __init__(self, path, targets):
-        self.handle = TabixFile(path)
+        self.handle = TabixFile(str(path))
         self.targets = targets
         # skip the first three fields '#Chr\tStart\tEnd'
         samples = self.handle.header[0].lstrip("#").split("\t")[3:]
@@ -51,32 +40,50 @@ def read_sample_map(path):
     return tmp
 
 
-def filter_gt_by_coverage(inbcf, outbcf, rdmat, sample_map, min_cov):
-    for rec in inbcf.fetch():
-        if rec.info["SVTYPE"] == "DEL":
-            outbcf.write(rec)
+def filter_site_gts(record, sample_map, medians, mads, min_cov, max_mad):
+    for sid in record.samples.keys():
+        target = sample_map[sid]
+        if target not in medians:
             continue
-        cov = rdmat.fetch_as_df(
-            rec.contig, rec.pos - 1, rec.pos + rec.info["SVLEN"] - 1
-        )
-        median_covs = cov.median(axis=0)
-        for sid in rec.samples.keys():
-            target = sample_map[sid]
-            if target in median_covs and (
-                pd.isna(median_covs[target]) or median_covs[target] < min_cov
-            ):
-                rec.samples[sid]["GT"] = (None, None)
+        if (record.info["SVTYPE"] != "DEL" and (pd.isna(medians[target]) or medians[target] < min_cov)):
+            record.samples[sid]["GT"] = (None, None)
+        elif mads[target] > max_mad:
+            record.samples[sid]["GT"] = (None, None)
+
+    return record
+
+def mad(x):
+    return (x - x.median()).abs().median()
+
+
+def do_filtering(inbcf, outbcf, rdmat, sample_map, min_cov, max_mad):
+    for rec in inbcf.fetch():
+        cov = rdmat.fetch_as_df(rec.contig, rec.pos - 1, rec.stop)
+        site_median_covs = cov.median(axis=0)
+        mads = cov.apply(mad)
+        filtered_rec = filter_site_gts(rec, sample_map, site_median_covs, mads, min_cov, max_mad)
         outbcf.write(rec)
+
+def parse_args():
+    parser = argparse.ArgumentParser(description = "Update genotypes in a VCF/BCF based on site coverage")
+    parser.add_argument("in_bcf", type = Path, help = "VCF/BCF to update")
+    parser.add_argument("out_bcf", type = Path, help = "Where to write the updated VCF/BCF")
+    parser.add_argument("rd_mat", type = Path, help = "Binned read-depth matrix")
+    parser.add_argument("targets", type = Path, help = "Two-column TSV with ID of sample in VCF/BCF in first column and ID of sample to check for read-depth")
+    parser.add_argument("--min-cov", type = int, default = 10, help = "Minimum median coverage a sample must have to keep a genotype")
+    parser.add_argument("--max-mad", type = float, default = 10, help = "Maximum MAD of coverage a sample can have to keep a genotype")
+
+    return parser.parse_args()
 
 
 def main():
-    inbcf = VariantFile(sys.argv[1], mode="r")
-    outbcf = VariantFile(sys.argv[2], mode="w", header=inbcf.header)
-    sample_map = read_sample_map(sys.argv[4])
+    args = parse_args()
+    inbcf = VariantFile(args.in_bcf, mode="r")
+    outbcf = VariantFile(args.out_bcf, mode="w", header=inbcf.header)
+    sample_map = read_sample_map(args.targets)
     targets = set(sample_map[x] for x in inbcf.header.samples if x in sample_map)
-    rdmat = RdMatReader(sys.argv[3], targets)
-    min_cov = int(sys.argv[5])
-    filter_gt_by_coverage(inbcf, outbcf, rdmat, sample_map, min_cov)
+    rdmat = RdMatReader(args.rd_mat, targets)
+    do_filtering(inbcf, outbcf, rdmat, sample_map, args.min_cov, args.max_mad)
 
 
 if __name__ == "__main__":

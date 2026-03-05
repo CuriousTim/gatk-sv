@@ -21,6 +21,8 @@ workflow DeNovoSvs {
     Float exclude_regions_ovp = 0.5
     # Minimum median binned depth over SV region required to keep an alt genotype
     Int min_site_depth = 10
+    # Maximum MAD over SV region allowed to keep an alt genotype
+    Int max_mad = 10
 
     # Exclude SVs larger than 1Mb (useful if these have already been reviewed)
     Boolean remove_large_svs = false
@@ -1639,6 +1641,7 @@ task NullLowDepthGenotypes {
     File bincov_mat_index
     File pedigree
     Int min_site_depth
+    Int max_mad
     String denovo_docker
     RuntimeAttr? runtime_attr_override
   }
@@ -1652,6 +1655,7 @@ task NullLowDepthGenotypes {
     bincov_mat_index: "Binned coverage matrix index of batch."
     pedigree: "Pedigree in PED format."
     min_site_depth: "Minimum median site depth for a genotype to be kept."
+    max_mad: "Maximum MAD site depth for a genotype to be kept."
     denovo_docker: "de novo pipeline Docker image."
     runtime_attr_override: "Runtime attribute overrides."
   }
@@ -1703,19 +1707,25 @@ task NullLowDepthGenotypes {
       '~{batch_id}-by_offspring-nulled.bcf' \
       '~{bincov_mat}' \
       offspring_targets \
-      '~{min_site_depth}'
+      '~{min_site_depth}' \
+      --min-cov ~{min_site_depth} \
+      --max-mad ~{max_mad}
     python /opt/gatk-sv/denovo/null_low_coverage_gt.py \
       '~{by_father_batch_bcf}' \
       '~{batch_id}-by_father-nulled.bcf' \
       '~{bincov_mat}' \
       father_targets \
-      '~{min_site_depth}'
+      '~{min_site_depth}' \
+      --min-cov ~{min_site_depth} \
+      --max-mad ~{max_mad}
     python /opt/gatk-sv/denovo/null_low_coverage_gt.py \
       '~{by_mother_batch_bcf}' \
       '~{batch_id}-by_mother-nulled.bcf' \
       '~{bincov_mat}' \
       mother_targets \
-      '~{min_site_depth}'
+      '~{min_site_depth}' \
+      --min-cov ~{min_site_depth} \
+      --max-mad ~{max_mad}
   >>>
 }
 
