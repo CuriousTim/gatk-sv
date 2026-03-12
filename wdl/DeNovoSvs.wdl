@@ -317,6 +317,7 @@ workflow DeNovoSvs {
         offspring_depth_vcf = MergeOffspringSites.merged_depth_vcf,
         offspring_depth_vcf_index = MergeOffspringSites.merged_depth_vcf_index,
         bincov_mat = MakeManifests.bincov_map[current_batch],
+        reference_dict = reference_dict,
         gatk_docker = gatk_docker,
         runtime_attr_override = runtime_override_subset_bincov_matrix,
     }
