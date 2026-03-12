@@ -332,6 +332,7 @@ workflow DeNovoSvs {
         bincov_mat_index = SubsetBincovMatrix.subset_bincov_index,
         pedigree = SubsetSamples.ped_subset,
         min_site_depth = min_site_depth,
+        max_mad = max_mad,
         denovo_docker = denovo_docker,
         runtime_attr_override = runtime_override_null_low_depth_genotypes 
     }
@@ -1765,7 +1766,6 @@ task NullLowDepthGenotypes {
       '~{batch_id}-by_offspring-nulled.bcf' \
       '~{bincov_mat}' \
       offspring_targets \
-      '~{min_site_depth}' \
       --min-cov ~{min_site_depth} \
       --max-mad ~{max_mad}
     python /opt/gatk-sv/denovo/null_low_coverage_gt.py \
@@ -1773,7 +1773,6 @@ task NullLowDepthGenotypes {
       '~{batch_id}-by_father-nulled.bcf' \
       '~{bincov_mat}' \
       father_targets \
-      '~{min_site_depth}' \
       --min-cov ~{min_site_depth} \
       --max-mad ~{max_mad}
     python /opt/gatk-sv/denovo/null_low_coverage_gt.py \
@@ -1781,7 +1780,6 @@ task NullLowDepthGenotypes {
       '~{batch_id}-by_mother-nulled.bcf' \
       '~{bincov_mat}' \
       mother_targets \
-      '~{min_site_depth}' \
       --min-cov ~{min_site_depth} \
       --max-mad ~{max_mad}
   >>>
