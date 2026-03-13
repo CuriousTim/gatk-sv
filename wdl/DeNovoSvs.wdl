@@ -182,16 +182,16 @@ workflow DeNovoSvs {
         runtime_attr_override = runtime_override_filter_offspring_sites
     }
 
-    call FilterOffspringGenotypesByGq {
-      input:
-        bcf = FilterOffspringSites.filtered_bcf,
-        sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_filter_offspring_genotypes_by_gq
-    }
+    # call FilterOffspringGenotypesByGq {
+    #   input:
+    #     bcf = FilterOffspringSites.filtered_bcf,
+    #     sv_base_mini_docker = sv_base_mini_docker,
+    #     runtime_attr_override = runtime_override_filter_offspring_genotypes_by_gq
+    # }
 
     call MatchBcfToContig {
       input:
-        bcf = FilterOffspringGenotypesByGq.filtered_bcf,
+        bcf = FilterOffspringSites.filtered_bcf,
         contigs = contigs,
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_match_bcf_to_contig
