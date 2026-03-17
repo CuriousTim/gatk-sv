@@ -1056,8 +1056,7 @@ task RemoveInheritedVariants {
     File filtered_bcf = filtered_bcf_name
   }
 
-  Float bcf_size = size(bcf, "GB")
-
+  Float inputs_size = size([bcf, pedigree], "GB")
   RuntimeAttr default_attr = object {
     mem_gb: 4,
     cpu_cores: 2,
