@@ -177,6 +177,7 @@ workflow DeNovoSvs {
     call RemoveInheritedVariants {
       input:
         bcf = FilterOffspringSites.filtered_bcf,
+        pedigree = SubsetSamples.ped_subset,
         denovo_docker = denovo_docker,
         runtime_attr_override = runtime_override_remove_inherited_variants
     }
