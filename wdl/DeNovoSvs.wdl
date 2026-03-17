@@ -185,13 +185,6 @@ workflow DeNovoSvs {
         runtime_attr_override = runtime_override_remove_inherited_variants
     }
 
-    # call FilterOffspringGenotypesByGq {
-    #   input:
-    #     bcf = FilterOffspringSites.filtered_bcf,
-    #     sv_base_mini_docker = sv_base_mini_docker,
-    #     runtime_attr_override = runtime_override_filter_offspring_genotypes_by_gq
-    # }
-
     call MakeOffspringBcf {
       input:
         bcf = RemoveInheritedVariants.filtered_bcf,
@@ -1060,7 +1053,7 @@ task RemoveInheritedVariants {
   RuntimeAttr default_attr = object {
     mem_gb: 4,
     cpu_cores: 2,
-    disk_gb: ceil(bcf_size * 2) + 32,
+    disk_gb: ceil(inputs_size * 2) + 32,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
@@ -1084,56 +1077,6 @@ task RemoveInheritedVariants {
 
     python /opt/gatk-sv/denovo/remove_inherited_variants.py \
       '~{bcf}' '~{pedigree}' '~{filtered_bcf_name}'
-  >>>
-}
-
-
-task FilterOffspringGenotypesByGq {
-  input {
-    File bcf
-    String sv_base_mini_docker
-    RuntimeAttr? runtime_attr_override
-  }
-
-  parameter_meta {
-    bcf: "BCF with offspring samples."
-    sv_base_mini_docker: "The corresponding Docker image from GATK-SV."
-    runtime_attr_override: "Runtime attribute overrides."
-  }
-
-  output {
-    File filtered_bcf = filtered_bcf_name
-  }
-
-  Float bcf_size = size(bcf, "GB")
-
-  RuntimeAttr default_attr = object {
-    mem_gb: 4,
-    cpu_cores: 2,
-    disk_gb: ceil(bcf_size * 2) + 16,
-    boot_disk_gb: 8,
-    preemptible_tries: 3,
-    max_retries: 1,
-  }
-  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-  runtime {
-    memory: "${select_first([runtime_attr.mem_gb, default_attr.mem_gb])} GB"
-    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-    disks: "local-disk ${select_first([runtime_attr.disk_gb, default_attr.disk_gb])} HDD"
-    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: sv_base_mini_docker
-  }
-
-  String filtered_bcf_name = "gq_filtered-${basename(bcf)}"
-
-  command <<<
-    set -euxo pipefail
-
-    bcftools plugin setGT --output-type b --output '~{filtered_bcf_name}' \
-      '~{bcf}' -- --target-gt q --new-gt '.' --include 'GQ = 0'
   >>>
 }
 
