@@ -140,8 +140,8 @@ workflow DeNovoSvs {
       sv_base_mini_docker = sv_base_mini_docker,
       runtime_attr_override = runtime_override_subset_samples
   }
-
   Array[File] contig_vcfs = select_first([subset_vcfs, vcfs])
+
   call GroupOffspringByBatch {
     input:
       offspring = SubsetSamples.offspring,
@@ -833,10 +833,11 @@ task RemoveUncalledSvtypes {
     File cpx_vcf = cpx_vcf_name
   }
 
+  Float inputs_size = size(vcf, "GB")
   RuntimeAttr default_attr = object {
     mem_gb: 4,
     cpu_cores: 1,
-    disk_gb: ceil(size(vcf, "GB") * 3)  + 16,
+    disk_gb: ceil(inputs_size * 3)  + 32,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
@@ -853,11 +854,11 @@ task RemoveUncalledSvtypes {
     docker: sv_base_mini_docker
   }
 
-  String filtered_bcf_name = "svtypes_filtered-" + basename(vcf, ".vcf.gz")
+  String filtered_bcf_name = basename(vcf, ".vcf.gz") + ".bcf"
   String cpx_vcf_name = "cpx_ctx-" + basename(vcf)
 
   command <<<
-    set -euxo pipefail
+    set -euo pipefail
 
     bcftools view --exclude 'INFO/SVTYPE = "BND" || INFO/SVTYPE = "CNV"' \
       --output-type b --output tmp.bcf '~{vcf}'
