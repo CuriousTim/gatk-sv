@@ -9,8 +9,9 @@ import "DeNovoSvsGroupOffspringBcf.wdl"
 
 workflow DeNovoSvs {
   input {
+    # Pedigree in GATK PED format
     File pedigree
-    # One family ID per line to call de novo in subset of families
+    # One family ID per line to call de novo in a subset of families
     File? family_ids
 
     Float max_cohort_af = 0.02
@@ -403,7 +404,7 @@ workflow DeNovoSvs {
   }
 }
 
-# Create manifests of the paths to the raw evidence files.
+# Create manifests for the raw evidence files and batch sample memberships.
 task MakeManifests {
   input {
     Array[String] batch_name_list
@@ -445,21 +446,16 @@ task MakeManifests {
     Map[String, String] bincov_index_map = read_map("bincov_index_manifest.tsv")
   }
 
-  Float input_size = size(batch_sample_lists, "GB")
+  Float inputs_size = size(batch_sample_lists, "GB")
   RuntimeAttr default_attr = object {
     mem_gb: 1,
     cpu_cores: 1,
-    disk_gb: ceil(input_size * 3) + 16,
+    disk_gb: ceil(input_size * 2) + 32,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
   }
   RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-  Array[String] manta_vcfs = select_first([clustered_manta_vcf, []])
-  Array[String] melt_vcfs = select_first([clustered_melt_vcf, []])
-  Array[String] wham_vcfs = select_first([clustered_wham_vcf, []])
-  Array[String] scramble_vcfs = select_first([clustered_scramble_vcf, []])
 
   runtime {
     memory: "${select_first([runtime_attr.mem_gb, default_attr.mem_gb])} GB"
@@ -471,8 +467,13 @@ task MakeManifests {
     docker: denovo_docker
   }
 
+  Array[String] manta_vcfs = select_first([clustered_manta_vcf, []])
+  Array[String] melt_vcfs = select_first([clustered_melt_vcf, []])
+  Array[String] wham_vcfs = select_first([clustered_wham_vcf, []])
+  Array[String] scramble_vcfs = select_first([clustered_scramble_vcf, []])
+
   command <<<
-    set -euxo pipefail
+    set -euo pipefail
 
     batch_names='~{write_lines(batch_name_list)}'
 
@@ -498,7 +499,7 @@ task MakeManifests {
     fi
 
     if [[ ! -s pesr_manifest.tsv ]]; then
-        printf 'at least one non-empty list of PESR evidence VCFs should be provided\n' >&2
+        printf 'at least one non-empty list of PESR evidence VCFs must be provided\n' >&2
         exit 1
     fi
 
