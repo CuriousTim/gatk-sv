@@ -526,7 +526,7 @@ EOF
   >>>
 }
 
-# Retrieve a single contig from a VCF.
+# Retrieve a single contig, if present, from a VCF.
 task SubsetVcfByContig {
   input {
     File vcf
@@ -545,14 +545,14 @@ task SubsetVcfByContig {
   }
 
   output {
-    File? subset_vcf = contig_vcf
+    File? subset_vcf = subset_vcf_name
   }
 
-  Float input_size = size([vcf, vcf_index], "GB")
+  Float inputs_size = size([vcf, vcf_index], "GB")
   RuntimeAttr default_attr = object {
     mem_gb: 1,
     cpu_cores: 1,
-    disk_gb: ceil(input_size * 1.1) + 16,
+    disk_gb: ceil(inputs_size * 2) + 32,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
@@ -569,17 +569,17 @@ task SubsetVcfByContig {
     docker: sv_base_mini_docker
   }
 
-  String contig_vcf = "${contig}.vcf.gz"
+  String subset_vcf_name = "${contig}.vcf.gz"
 
   command <<<
-    set -euxo pipefail
+    set -euo pipefail
 
-    bcftools view --regions '~{contig}' --output-type z --output '~{contig_vcf}' \
+    bcftools view --regions '~{contig}' --output-type z --output '~{subset_vcf_name}' \
       '~{vcf}'
 
-    read -r nrec < <(bcftools head --header 0 --records 1 '~{contig_vcf}' | wc -l)
+    read -r nrec < <(bcftools head --header 0 --records 1 '~{subset_vcf_name}' | wc -l)
     if (( nrec == 0 )); then
-      rm '~{contig_vcf}'
+      rm '~{subset_vcf_name}'
       exit 0
     fi
   >>>
