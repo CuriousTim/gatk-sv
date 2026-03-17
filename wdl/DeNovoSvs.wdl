@@ -133,7 +133,7 @@ workflow DeNovoSvs {
 
   call SubsetSamples {
     input:
-      ped = pedigree,
+      pedigree = pedigree,
       fams = family_ids,
       vcf = vcfs[(length(vcfs) - 1)],
       sample_manifest = MakeManifests.sample_manifest,
