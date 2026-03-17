@@ -450,7 +450,7 @@ task MakeManifests {
   RuntimeAttr default_attr = object {
     mem_gb: 1,
     cpu_cores: 1,
-    disk_gb: ceil(input_size * 2) + 32,
+    disk_gb: ceil(inputs_size * 2) + 32,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
