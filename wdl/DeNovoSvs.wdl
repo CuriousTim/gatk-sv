@@ -14,12 +14,14 @@ workflow DeNovoSvs {
     # One family ID per line to call de novo in a subset of families
     File? family_ids
 
-    Float max_cohort_af = 0.02
-    Float max_gnomad_af = 0.01
-    Int large_cnv_size = 1000
-    Int depth_only_size = 5000
+    # Site-level filters. See ApplySiteFilters
+    Float? max_cohort_af
+    Float? max_gnomad_af
+    Int? large_cnv_size 
+    Int? depth_only_size
     Array[File]? exclude_regions
-    Float exclude_regions_ovp = 0.5
+    Float? exclude_regions_ovp
+
     # Minimum median binned depth over SV region required to keep an alt genotype
     Int min_site_depth = 10
     # Maximum MAD over SV region allowed to keep an alt genotype
@@ -79,7 +81,7 @@ workflow DeNovoSvs {
     RuntimeAttr? runtime_override_group_offspring_by_batch
     RuntimeAttr? runtime_override_make_offspring_bcf
     RuntimeAttr? runtime_override_remove_uncalled_svtypes
-    RuntimeAttr? runtime_override_filter_offspring_sites
+    RuntimeAttr? runtime_override_apply_site_filters
     RuntimeAttr? runtime_override_remove_inherited_variants
     RuntimeAttr? runtime_override_filter_offspring_genotypes_by_gq
     RuntimeAttr? runtime_override_match_bcf_to_contig
@@ -160,7 +162,7 @@ workflow DeNovoSvs {
         runtime_attr_override = runtime_override_remove_uncalled_svtypes
     }
 
-    call FilterOffspringSites {
+    call ApplySiteFilters {
       input:
         bcf = RemoveUncalledSvtypes.filtered_bcf,
         max_cohort_af = max_cohort_af,
@@ -172,12 +174,12 @@ workflow DeNovoSvs {
         remove_large_svs = remove_large_svs,
         genomic_disorders_bed = genomic_disorders_bed,
         sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_filter_offspring_sites
+        runtime_attr_override = runtime_override_apply_site_filters
     }
 
     call RemoveInheritedVariants {
       input:
-        bcf = FilterOffspringSites.filtered_bcf,
+        bcf = ApplySiteFilters.filtered_bcf,
         pedigree = SubsetSamples.ped_subset,
         denovo_docker = denovo_docker,
         runtime_attr_override = runtime_override_remove_inherited_variants
@@ -210,7 +212,7 @@ workflow DeNovoSvs {
 
   call MergeTsvsWithHeader as merge_removed_sites {
     input:
-      tsvs = FilterOffspringSites.removed_sites,
+      tsvs = ApplySiteFilters.removed_sites,
       merged_file_prefix = "removed_sites",
       linux_docker = linux_docker,
       runtime_attr_override = runtime_override_merge_tsvs_with_header
@@ -882,16 +884,16 @@ task RemoveUncalledSvtypes {
 # Optionally remove sites that:
 #    1. are equal to or greater than 1Mb in size
 #    2. are CNVs that have >= 50% reciprocal overlap with a genomic disorder region
-task FilterOffspringSites {
+task ApplySiteFilters {
   input {
     File bcf
-    Float max_cohort_af
-    Float max_gnomad_af
-    Int large_cnv_size
-    Int depth_only_size
+    Float max_cohort_af = 0.02
+    Float max_gnomad_af = 0.01
+    Int large_cnv_size = 1000
+    Int depth_only_size = 5000
     Array[File]? exclude_regions
-    Float exclude_regions_ovp
-    Boolean remove_large_svs
+    Float exclude_regions_ovp = 0.5
+    Boolean remove_large_svs = false
     File? genomic_disorders_bed
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
@@ -917,12 +919,14 @@ task FilterOffspringSites {
   }
 
   Float bcf_size = size(bcf, "GB")
-  Float other_size = (if defined(exclude_regions) then size(select_first([exclude_regions]), "GB") else 0)
+  Float exclude_size = (if defined(exclude_regions) then size(select_first([exclude_regions]), "GB") else 0)
+  Float gd_size = (if defined(genomic_disorders_bed) then size(select_first([genomic_disorders_bed]), "GB") else 0)
+  Float other_size = exclude_size + gd_size
 
   RuntimeAttr default_attr = object {
     mem_gb: 4,
     cpu_cores: 2,
-    disk_gb: ceil(bcf_size * 4 + other_size) + 16,
+    disk_gb: ceil(bcf_size * 4 + other_size) + 32,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
