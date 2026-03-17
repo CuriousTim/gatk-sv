@@ -79,6 +79,7 @@ workflow DeNovoSvs {
     RuntimeAttr? runtime_override_make_offspring_bcf
     RuntimeAttr? runtime_override_remove_uncalled_svtypes
     RuntimeAttr? runtime_override_filter_offspring_sites
+    RuntimeAttr? runtime_override_remove_inherited_variants
     RuntimeAttr? runtime_override_filter_offspring_genotypes_by_gq
     RuntimeAttr? runtime_override_match_bcf_to_contig
     RuntimeAttr? runtime_override_merge_offspring_sites
@@ -151,18 +152,9 @@ workflow DeNovoSvs {
   }
 
   scatter (i in range(length(contig_vcfs))) {
-    call MakeOffspringBcf {
-      input:
-        vcf = contig_vcfs[i],
-        offspring = SubsetSamples.offspring,
-        bcf_prefix = "offspring_${i}",
-        sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_make_offspring_bcf
-    }
-
     call RemoveUncalledSvtypes {
       input:
-        bcf = MakeOffspringBcf.offspring_bcf,
+        vcf = contig_vcfs[i],
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_remove_uncalled_svtypes
     }
@@ -182,6 +174,13 @@ workflow DeNovoSvs {
         runtime_attr_override = runtime_override_filter_offspring_sites
     }
 
+    call RemoveInheritedVariants {
+      input:
+        bcf = FilterOffspringSites.filtered_bcf,
+        denovo_docker = denovo_docker,
+        runtime_attr_override = runtime_override_remove_inherited_variants
+    }
+
     # call FilterOffspringGenotypesByGq {
     #   input:
     #     bcf = FilterOffspringSites.filtered_bcf,
@@ -189,9 +188,18 @@ workflow DeNovoSvs {
     #     runtime_attr_override = runtime_override_filter_offspring_genotypes_by_gq
     # }
 
+    call MakeOffspringBcf {
+      input:
+        bcf = RemoveInheritedVariants.filtered_bcf,
+        offspring = SubsetSamples.offspring,
+        bcf_prefix = "offspring_${i}",
+        sv_base_mini_docker = sv_base_mini_docker,
+        runtime_attr_override = runtime_override_make_offspring_bcf
+    }
+
     call MatchBcfToContig {
       input:
-        bcf = FilterOffspringSites.filtered_bcf,
+        bcf = MakeOffspringBcf.offspring_bcf,
         contigs = contigs,
         sv_base_mini_docker = sv_base_mini_docker,
         runtime_attr_override = runtime_override_match_bcf_to_contig
@@ -748,10 +756,10 @@ task GroupOffspringByBatch {
 }
 
 
-# Subset a VCF to offspring samples and convert to BCF.
+# Subset a BCF to offspring samples.
 task MakeOffspringBcf {
   input {
-    File vcf
+    File bcf
     File offspring
     String bcf_prefix
     String sv_base_mini_docker
@@ -759,7 +767,7 @@ task MakeOffspringBcf {
   }
 
   parameter_meta {
-    vcf: "VCF file to subset."
+    bcf: "BCF file to subset."
     offspring: "Offspring samples, one per line."
     bcf_prefix: "Prefix to use for the output."
     sv_base_mini_docker: "The corresponding Docker image from GATK-SV."
@@ -773,7 +781,7 @@ task MakeOffspringBcf {
   RuntimeAttr default_attr = object {
     mem_gb: 4,
     cpu_cores: 1,
-    disk_gb: ceil(size(vcf, "GB") * 2 + size(offspring, "GB")) + 16,
+    disk_gb: ceil(size(bcf, "GB") * 2 + size(offspring, "GB")) + 16,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
@@ -796,23 +804,23 @@ task MakeOffspringBcf {
     set -euxo pipefail
 
     bcftools view --no-update --samples-file '~{offspring}' --output-type b \
-      --output '~{offspring_name}' '~{vcf}'
+      --output '~{offspring_name}' '~{bcf}'
   >>>
 }
 
-# Remove SV types from a BCF of offspring sites that are not handled in the de novo pipeline. All
+# Remove SV types from a VCF of offspring sites that are not handled in the de novo pipeline. All
 # BND and CNV sites are removed. Then the remaining sites are split into two: those that are CPX or
 # CTX and those that are not. The file with CPX and CTX events will be a VCF and the file without
 # those SV types will be BCF.
 task RemoveUncalledSvtypes {
   input {
-    File bcf
+    File vcf
     String sv_base_mini_docker
     RuntimeAttr? runtime_attr_override
   }
 
   parameter_meta {
-    bcf: "BCF file to filter."
+    vcf: "VCF file to filter."
     sv_base_mini_docker: "The corresponding Docker image from GATK-SV."
     runtime_attr_override: "Runtime attribute overrides."
   }
@@ -825,7 +833,7 @@ task RemoveUncalledSvtypes {
   RuntimeAttr default_attr = object {
     mem_gb: 4,
     cpu_cores: 1,
-    disk_gb: ceil(size(bcf, "GB") * 3)  + 16,
+    disk_gb: ceil(size(vcf, "GB") * 3)  + 16,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
@@ -842,14 +850,14 @@ task RemoveUncalledSvtypes {
     docker: sv_base_mini_docker
   }
 
-  String filtered_bcf_name = "svtypes_filtered-" + basename(bcf)
-  String cpx_vcf_name = "cpx_ctx-" + basename(bcf, ".bcf") + ".vcf.gz"
+  String filtered_bcf_name = "svtypes_filtered-" + basename(vcf, ".vcf.gz")
+  String cpx_vcf_name = "cpx_ctx-" + basename(vcf)
 
   command <<<
     set -euxo pipefail
 
     bcftools view --exclude 'INFO/SVTYPE = "BND" || INFO/SVTYPE = "CNV"' \
-      --output-type b --output tmp.bcf '~{bcf}'
+      --output-type b --output tmp.bcf '~{vcf}'
 
     bcftools view --exclude 'INFO/SVTYPE = "CPX" || INFO/SVTYPE = "CTX"' \
       --output-type b --output '~{filtered_bcf_name}' tmp.bcf
@@ -1020,6 +1028,58 @@ task FilterOffspringSites {
       --output '~{filtered_bcf_name}' '~{bcf}'
   >>>
 }
+
+task RemoveInheritedVariants {
+  input {
+    File bcf
+    File pedigree
+    String denovo_docker
+    RuntimeAttr? runtime_attr_override
+  }
+
+  parameter_meta {
+    bcf: "BCF with offspring samples."
+    pedigree: "Pedigree."
+    denovo_docker: "The corresponding Docker image from GATK-SV."
+    runtime_attr_override: "Runtime attribute overrides."
+  }
+
+  output {
+    File filtered_bcf = filtered_bcf_name
+  }
+
+  Float bcf_size = size(bcf, "GB")
+
+  RuntimeAttr default_attr = object {
+    mem_gb: 4,
+    cpu_cores: 2,
+    disk_gb: ceil(bcf_size * 2) + 32,
+    boot_disk_gb: 8,
+    preemptible_tries: 3,
+    max_retries: 1,
+  }
+  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
+
+  runtime {
+    memory: "${select_first([runtime_attr.mem_gb, default_attr.mem_gb])} GB"
+    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
+    disks: "local-disk ${select_first([runtime_attr.disk_gb, default_attr.disk_gb])} HDD"
+    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
+    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
+    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
+    docker: denovo_docker
+  }
+
+  String filtered_bcf_name = "inheritance_filtered-${basename(bcf)}"
+
+  command <<<
+    set -euxo pipefail
+
+    python /opt/gatk-sv/denovo/remove_inherited_variants.py \
+      '~{bcf}' '~{pedigree}' '~{filtered_bcf_name}'
+  >>>
+}
+
 
 task FilterOffspringGenotypesByGq {
   input {

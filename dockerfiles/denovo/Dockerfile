@@ -97,6 +97,7 @@ ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
 COPY src/denovo/null_low_coverage_gt.py /opt/gatk-sv/denovo/null_low_coverage_gt.py
+COPY src/denovo/remove_inherited_variants.py /opt/gatk-sv/denovo/remove_inherited_variants.py
 
 RUN ldconfig
 
