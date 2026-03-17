@@ -585,7 +585,7 @@ task SubsetVcfByContig {
   >>>
 }
 
-# Subset the pedigree, samples and batches so they are all synchronized.
+# Subset the cohort pedigree, samples, and batches so they are all synchronized.
 # 1. Subset the pedigree to trios.
 # 2. Subset the pedigree by families, if present.
 # 3. Subset the pedigree to trios for which all members are in the VCF.
@@ -593,7 +593,7 @@ task SubsetVcfByContig {
 # 5. Subset the batch manifest to batches with samples in the list from 4.
 task SubsetSamples {
   input {
-    File ped
+    File pedigree
     File? fams
     File vcf
     File sample_manifest
@@ -602,7 +602,7 @@ task SubsetSamples {
   }
 
   parameter_meta {
-    ped: "Pedigree."
+    pedigree: "Pedigree."
     fams: "Family IDs, one per line, to use to subset the pedigree."
     vcf: "VCF to use to synchronize."
     sample_manifest: "TSV with batches in the first column and samples in the second."
@@ -616,11 +616,11 @@ task SubsetSamples {
     File batch_subset = "batch_subset.list"
   }
 
-  Float input_size = size(select_all([ped, fams, vcf, sample_manifest]), "GB")
+  Float inputs_size = size(select_all([pedigree, fams, vcf, sample_manifest]), "GB")
   RuntimeAttr default_attr = object {
     mem_gb: 2,
     cpu_cores: 1,
-    disk_gb: ceil(input_size) + 16,
+    disk_gb: ceil(inputs_size) + 32,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
@@ -638,10 +638,11 @@ task SubsetSamples {
   }
 
   command <<<
-    set -euxo pipefail
+    set -euo pipefail
 
     fam_ids='~{if defined(fams) then fams else ""}'
-    awk -F'\t' '$2 && $3 && $4' '~{ped}' > trios.ped
+    # missing sample IDs in pedigree must be "" (empty string) or 0 and awk treats both as false
+    awk -F'\t' '$2 && $3 && $4' '~{pedigree}' > trios.ped
     ped=trios.ped
 
     if [[ -n "${fam_ids:-}" && -s "${fam_ids}" ]]; then
@@ -680,7 +681,7 @@ task SubsetSamples {
       exit 1
     fi
 
-    awk -F'\t' '{print $2}' subset.ped | sort -u > offspring.list
+    cut -f 2 subset.ped | sort -u > offspring.list
   >>>
 }
 
