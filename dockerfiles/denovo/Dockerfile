@@ -96,8 +96,8 @@ COPY --from=builder /opt/venv /opt/venv
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 
-COPY src/denovo/null_low_coverage_gt.py /opt/gatk-sv/denovo/null_low_coverage_gt.py
 COPY src/denovo/remove_inherited_variants.py /opt/gatk-sv/denovo/remove_inherited_variants.py
+COPY src/denovo/annotate_denovos.py /opt/gatk-sv/denovo/annotate_denovos.py
 
 RUN ldconfig
 
