@@ -541,6 +541,7 @@ task SubsetVcfByContig {
 
   output {
     File? subset_vcf = subset_vcf_name
+    File? subset_vcf_index = subset_vcf_name + ".tbi"
   }
 
   Float inputs_size = size([vcf, vcf_index], "GB")
@@ -576,6 +577,8 @@ task SubsetVcfByContig {
     if (( nrec == 0 )); then
       rm '~{subset_vcf_name}'
       exit 0
+    else
+      bcftools index --tbi '~{subset_vcf_name}'
     fi
   >>>
 }
