@@ -1174,7 +1174,7 @@ task ConcatVcfsInContigOrder {
 
   output {
     File merged_file = merged_file_name
-    File merged_file_index = merged_file_name + ".tbi"
+    File merged_file_index = merged_file_name + ".csi"
   }
 
   Float inputs_size = size(vcfs, "GB")
@@ -1209,7 +1209,7 @@ task ConcatVcfsInContigOrder {
 
     bcftools concat --file-list merge_list --output '~{merged_file_name}' \
       --output-type ~{true='z' false='b' make_vcf}
-    bcftools index --tbi '~{merged_file_name}'
+    bcftools index --csi '~{merged_file_name}'
   >>>
 }
 
