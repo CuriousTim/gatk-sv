@@ -1627,7 +1627,7 @@ task ReformatCandidateBcfs {
       }
       NR > FNR && ($1 in a) {
         cmd = "gzip -c > " a[$1]
-        print $1 "\t" $2 | cmd
+        print $2 "\t" $3 | cmd
       }' dir="$1" bid='~{batch_id}' '~{write_lines(contigs)}' -
     }
 
