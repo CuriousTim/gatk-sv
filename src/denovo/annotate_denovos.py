@@ -94,7 +94,7 @@ def write_site_annotations(fp, bcf_header, rec, carriers, ped):
 
 
 def annotate(denovos, bcf, ped, output_path):
-    with gzip.open(output_path, "wb") as fp:
+    with gzip.open(output_path, "wt") as fp:
         fp.write(OUTPUT_HEADER)
         fp.write("\n")
         for rec in bcf.fetch():
