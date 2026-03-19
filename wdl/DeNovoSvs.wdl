@@ -74,7 +74,6 @@ workflow DeNovoSvs {
     RuntimeAttr? runtime_override_subset_samples
     RuntimeAttr? runtime_override_group_offspring_by_batch
     RuntimeAttr? runtime_override_make_offspring_bcf
-    RuntimeAttr? runtime_override_remove_uncalled_svtypes
     RuntimeAttr? runtime_override_apply_site_filters
     RuntimeAttr? runtime_override_remove_inherited_variants
     RuntimeAttr? runtime_override_concat_vcfs_in_contig_order
@@ -154,16 +153,9 @@ workflow DeNovoSvs {
   }
 
   scatter (i in range(length(contig_matched_vcfs))) {
-    call RemoveUncalledSvtypes {
-      input:
-        vcf = contig_matched_vcfs[i],
-        sv_base_mini_docker = sv_base_mini_docker,
-        runtime_attr_override = runtime_override_remove_uncalled_svtypes
-    }
-
     call ApplySiteFilters {
       input:
-        bcf = RemoveUncalledSvtypes.filtered_bcf,
+        vcf = contig_matched_vcfs[i],
         max_cohort_af = max_cohort_af,
         max_gnomad_af = max_gnomad_af,
         large_cnv_size = large_cnv_size,
@@ -196,7 +188,7 @@ workflow DeNovoSvs {
 
   call ConcatVcfsInContigOrder as concat_cpx_ctx {
     input:
-      vcfs = RemoveUncalledSvtypes.cpx_vcf,
+      vcfs = ApplySiteFilters.cpx_vcf,
       vcf_contigs = kept_contigs,
       contigs_order = contigs,
       merged_file_prefix = "CPX-CTX",
@@ -834,81 +826,24 @@ task MakeOffspringBcf {
   >>>
 }
 
-# Remove SV types from a VCF of offspring sites that are not handled in the de novo pipeline. All
-# BND and CNV sites are removed. Then the remaining sites are split into two: those that are CPX or
-# CTX and those that are not. The file with CPX and CTX events will be a VCF and the file without
-# those SV types will be BCF.
-task RemoveUncalledSvtypes {
-  input {
-    File vcf
-    String sv_base_mini_docker
-    RuntimeAttr? runtime_attr_override
-  }
-
-  parameter_meta {
-    vcf: "VCF to filter."
-    sv_base_mini_docker: "The corresponding Docker image from GATK-SV."
-    runtime_attr_override: "Runtime attribute overrides."
-  }
-
-  output {
-    File filtered_bcf = filtered_bcf_name
-    File cpx_vcf = cpx_vcf_name
-  }
-
-  Float inputs_size = size(vcf, "GB")
-  RuntimeAttr default_attr = object {
-    mem_gb: 4,
-    cpu_cores: 1,
-    disk_gb: ceil(inputs_size * 3)  + 32,
-    boot_disk_gb: 8,
-    preemptible_tries: 3,
-    max_retries: 1,
-  }
-  RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
-
-  runtime {
-    memory: "${select_first([runtime_attr.mem_gb, default_attr.mem_gb])} GB"
-    cpu: select_first([runtime_attr.cpu_cores, default_attr.cpu_cores])
-    disks: "local-disk ${select_first([runtime_attr.disk_gb, default_attr.disk_gb])} HDD"
-    bootDiskSizeGb: select_first([runtime_attr.boot_disk_gb, default_attr.boot_disk_gb])
-    preemptible: select_first([runtime_attr.preemptible_tries, default_attr.preemptible_tries])
-    maxRetries: select_first([runtime_attr.max_retries, default_attr.max_retries])
-    docker: sv_base_mini_docker
-  }
-
-  String filtered_bcf_name = basename(vcf, ".vcf.gz") + ".bcf"
-  String cpx_vcf_name = "cpx_ctx-" + basename(vcf)
-
-  command <<<
-    set -euo pipefail
-
-    bcftools view --exclude 'INFO/SVTYPE = "BND" || INFO/SVTYPE = "CNV"' \
-      --output-type b --output tmp.bcf '~{vcf}'
-
-    bcftools view --exclude 'INFO/SVTYPE = "CPX" || INFO/SVTYPE = "CTX"' \
-      --output-type b --output '~{filtered_bcf_name}' tmp.bcf
-    bcftools view --include 'INFO/SVTYPE = "CPX" || INFO/SVTYPE = "CTX"' \
-      --output-type z --output '~{cpx_vcf_name}' tmp.bcf
-  >>>
-}
-
 # Filter sites in an offspring BCF for potential de novos
-# 1. Remove all sites that:
-#    a. have an cohort or gnomAD allele frequency greater than the input
+# Remove all sites that:
+#    1. are BND or CNV
+#    2. are CTX or CPX (saved in a separate VCF)
+#    3. have an cohort or gnomAD allele frequency greater than the input
 #       thresholds
-#    b. are overlapped by exclude regions by a minimum of
+#    4. are overlapped by exclude regions by a minimum of
 #       `exclude_regions_ovp` fraction of the SV
-#    c. small CNVs that are SR-only and don't have BOTHSIDES_SUPPORT
-#    d. are depth-only DUPs and are smaller than the depth-only size threshold
-#    e. have a HIGH_SR_BACKGROUND flag
-#    f. are Wham-only DELs
+#    5. small CNVs that are SR-only and don't have BOTHSIDES_SUPPORT
+#    6. are depth-only DUPs and are smaller than the depth-only size threshold
+#    7. have a HIGH_SR_BACKGROUND flag
+#    8. are Wham-only DELs
 # Optionally remove sites that:
 #    1. are equal to or greater than 1Mb in size
 #    2. are CNVs that have >= 50% reciprocal overlap with a genomic disorder region
 task ApplySiteFilters {
   input {
-    File bcf
+    File vcf
     Float max_cohort_af = 0.02
     Float max_gnomad_af = 0.01
     Int large_cnv_size = 1000
@@ -922,7 +857,7 @@ task ApplySiteFilters {
   }
 
   parameter_meta {
-    bcf: "BCF to filter."
+    vcf: "VCF to filter."
     max_cohort_af: "Maximum cohort allele frequency allowed."
     max_gnomad_af: "Maximum gnomAD allele frequency allowed. The value should be in the INFO field with the key 'gnomad_v4.1_sv_AF'."
     large_cnv_size: "Minimum size, in bases, of a large CNV."
@@ -937,10 +872,11 @@ task ApplySiteFilters {
 
   output {
     File filtered_bcf = filtered_bcf_name
+    File cpx_vcf = cpx_vcf_name
     File removed_sites = "removed_sites.tsv.gz"
   }
 
-  Float bcf_size = size(bcf, "GB")
+  Float vcf_size = size(vcf, "GB")
   Float exclude_size = (if defined(exclude_regions) then size(select_first([exclude_regions]), "GB") else 0)
   Float gd_size = (if defined(genomic_disorders_bed) then size(select_first([genomic_disorders_bed]), "GB") else 0)
   Float other_size = exclude_size + gd_size
@@ -948,7 +884,7 @@ task ApplySiteFilters {
   RuntimeAttr default_attr = object {
     mem_gb: 4,
     cpu_cores: 2,
-    disk_gb: ceil(bcf_size * 4 + other_size) + 32,
+    disk_gb: ceil(vcf_size * 5 + other_size) + 32,
     boot_disk_gb: 8,
     preemptible_tries: 3,
     max_retries: 1,
@@ -965,10 +901,11 @@ task ApplySiteFilters {
     docker: sv_base_mini_docker
   }
 
-  String filtered_bcf_name = "sites_filtered-${basename(bcf)}"
+  String filtered_bcf_name = "sites_filtered-" + basename(vcf, ".vcf.gz") + ".bcf"
+  String cpx_vcf_name = "cpx_ctx-" + basename(vcf)
 
   command <<<
-    set -euxo pipefail
+    set -euo pipefail
 
     cat2() {
       if [[ "$1" = *.gz ]]; then
@@ -980,12 +917,24 @@ task ApplySiteFilters {
 
     records_fmt='%CHROM\t%POS\t%INFO/END\t%INFO/SVTYPE\t%INFO/SVLEN\t%ID\n'
 
-    bcftools view --drop-genotypes --output-type b --output sites_only.bcf '~{bcf}'
+    # Remove BND and CNV
+    bcftools view --exclude 'INFO/SVTYPE = "BND" || INFO/SVTYPE = "CNV"' \
+      --output-type b --output tmp.bcf '~{vcf}'
+
+    # Split into CPX/CTX and other
+    bcftools view --exclude 'INFO/SVTYPE = "CPX" || INFO/SVTYPE = "CTX"' \
+      --output-type b --output non_cpx.bcf tmp.bcf
+    bcftools view --include 'INFO/SVTYPE = "CPX" || INFO/SVTYPE = "CTX"' \
+      --output-type z --output '~{cpx_vcf_name}' tmp.bcf
+
+    # Apply cohot AF and gnomAD AF filters
+    bcftools view --drop-genotypes --output-type b --output sites_only.bcf non_cpx.bcf
     bcftools query --include 'AF > ~{max_cohort_af}' --format "${records_fmt}" sites_only.bcf \
       | awk -F'\t' '{print $0 "\tcohort_AF"}' > cohort_af_fail
     bcftools query --include 'gnomad_v4.1_sv_AF != "." && gnomad_v4.1_sv_AF > ~{max_gnomad_af}' --format "${records_fmt}" sites_only.bcf \
       | awk -F'\t' '{print $0 "\tgnomAD_AF"}' > gnomad_af_fail
 
+    # Apply large SV filter
     : > large_sv_fail
     if [[ '~{true="1" false="0" remove_large_svs}' = 1 ]]; then
       bcftools query --include 'SVLEN >= 1000000' --format "${records_fmt}" sites_only.bcf \
@@ -1012,21 +961,26 @@ task ApplySiteFilters {
       printf 'HIGH_SR_BACKGROUND not found in BCF\n' >&2
       exit 1
     fi
+    # Apply BOTHSIDES_SUPPORT filter
     bcftools view \
       --include '(SVTYPE = "DEL" || SVTYPE = "DUP") && (EVIDENCE ~ "^RD,SR$" || EVIDENCE = "SR") && SVLEN < ~{large_cnv_size}' \
       --output-type u sites_only.bcf \
       | bcftools query --exclude "${bothsides_filter}" --format "${records_fmt}" \
       | awk -F'\t' '{print $0 "\tsmall_sr_cnv"}' > bothsides_fail
+    # Apply small DUP, depth only filter
     bcftools query \
       --include 'SVTYPE = "DUP" && ALGORITHMS = "depth" && SVLEN < ~{depth_only_size}' \
       --format "${records_fmt}" sites_only.bcf \
       | awk -F'\t' '{print $0 "\tsmall_depth_only_dup"}' > depth_only_fail
+    # Apply HIGH_SR_BACKGROUND filter
     bcftools query --include "${high_sr_filter}" --format "${records_fmt}" sites_only.bcf \
       | awk -F'\t' '{print $0 "\thigh_sr_background"}' > high_sr_fail
+    # Apply Wham-only DEL filter
     bcftools query --include 'INFO/SVTYPE = "DEL" && INFO/ALGORITHMS = "wham"' \
       --format "${records_fmt}" sites_only.bcf \
       | awk -F'\t' '{print $0 "\twham_del"}' > wham_fail
 
+    # Apply blacklists filter
     bcftools query --format "${records_fmt}" sites_only.bcf > sites.bed
     : > exclude_regions_fail
     er_paths='~{if defined(exclude_regions) then write_lines(select_first([exclude_regions])) else ""}'
@@ -1038,6 +992,7 @@ task ApplySiteFilters {
         | awk -F'\t' 'BEGIN{OFS="\t"} $10 >= ovp {print $1,$2,$3,$4,$5,$6,"blacklist"}' ovp=~{exclude_regions_ovp} >> exclude_regions_fail
     fi
 
+    # Apply genomic disorders filter
     gd_bed_path='~{if defined(genomic_disorders_bed) then select_first([genomic_disorders_bed]) else ""}'
     : > gd_fail
     if [[ -n "${gd_bed_path:-}" ]]; then
@@ -1058,8 +1013,8 @@ task ApplySiteFilters {
     cut -f 6 removed_sites.tsv | sort -u > blacklist
     gzip removed_sites.tsv
 
-    bcftools view --exclude 'ID = @blacklist' --output-type u \
-      --output '~{filtered_bcf_name}' '~{bcf}'
+    # Remove the sites
+    bcftools view --exclude 'ID = @blacklist' --output-type u --output '~{filtered_bcf_name}' non_cpx.bcf
   >>>
 }
 
