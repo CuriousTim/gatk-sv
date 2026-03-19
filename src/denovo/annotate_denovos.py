@@ -43,31 +43,32 @@ def gt_to_str(x):
     return "/".join(("." if allele is None else str(x) for allele in x))
 
 
-def tsv_reader(path):
-    with open(path, mode="r") as fp:
-        for line in fp:
-            yield line.rstrip("\n").split("\t")
+def tsv_reader(fp):
+    for line in fp:
+        yield line.rstrip("\n").split("\t")
 
 
 def read_pedigree(path):
     fams = dict()
-    for fields in tsv_reader(path):
-        if (
-            is_valid_ped_sample(fields[1])
-            and is_valid_ped_sample(fields[2])
-            and is_valid_ped_sample(fields[3])
-        ):
-            fams[fields[1]] = (fields[2], fields[3])
+    with open(path, mode="r") as fp:
+        for fields in tsv_reader(fp):
+            if (
+                is_valid_ped_sample(fields[1])
+                and is_valid_ped_sample(fields[2])
+                and is_valid_ped_sample(fields[3])
+            ):
+                fams[fields[1]] = (fields[2], fields[3])
 
     return fams
 
 
 def read_denovos(path):
     denovos = dict()
-    for vid, sid in tsv_reader(path):
-        carriers = denovos.get(vid, set())
-        carriers.add(sid)
-        denovos[vid] = carriers
+    with gzip.open(path, mode="rb") as fp:
+        for vid, sid in tsv_reader(fp):
+            carriers = denovos.get(vid, set())
+            carriers.add(sid)
+            denovos[vid] = carriers
 
     return denovos
 
