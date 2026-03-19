@@ -1444,9 +1444,9 @@ task SVConcordance {
       '~{strict_pesr_name}' cluster_strict.tsv
     concordance 'offspring_depth.vcf.gz' '~{batch_depth_vcf}' \
       '~{strict_depth_name}' cluster_strict.tsv
-    concordance 'offspring_pesr_vcf.vcf.gz' '~{batch_pesr_vcf}' \
+    concordance 'offspring_pesr.vcf.gz' '~{batch_pesr_vcf}' \
       '~{lenient_pesr_name}' cluster_lenient.tsv
-    concordance 'offspring_depth_vcf.vcf.gz' '~{batch_depth_vcf}' \
+    concordance 'offspring_depth.vcf.gz' '~{batch_depth_vcf}' \
       '~{lenient_depth_name}' cluster_lenient.tsv
   >>>
 }
