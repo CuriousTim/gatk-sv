@@ -64,7 +64,7 @@ def read_pedigree(path):
 
 def read_denovos(path):
     denovos = dict()
-    with gzip.open(path, mode="rb") as fp:
+    with gzip.open(path, mode="rt") as fp:
         for vid, sid in tsv_reader(fp):
             carriers = denovos.get(vid, set())
             carriers.add(sid)
