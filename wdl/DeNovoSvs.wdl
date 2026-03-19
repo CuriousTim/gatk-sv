@@ -1252,8 +1252,8 @@ task ConcatVcfsInContigOrder {
     awk -F'\t' 'NR==FNR{a[$1]=$2} NR>FNR && ($1 in a){print a[$1]}' \
       vcfs.tsv '~{write_lines(contigs_order)}' > merge_list
 
-    bcftools concat --file-list merge_list --output '~{merged_file_name}'
-      --output-type ~{true='b' false='z' make_vcf}
+    bcftools concat --file-list merge_list --output '~{merged_file_name}' \
+      --output-type ~{true='z' false='b' make_vcf}
     bcftools index --tbi '~{merged_file_name}'
   >>>
 }
