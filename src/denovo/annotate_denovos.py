@@ -15,6 +15,7 @@ OUTPUT_HEADER = "\t".join(
         "svtype",
         "algorithm",
         "evidence",
+        "sample",
         "o_gt",
         "o_ev",
         "o_gq",
@@ -76,6 +77,7 @@ def write_site_annotations(fp, bcf_header, rec, carriers, ped):
         fp.write(f"{tuple_to_str(rec.alts)}\t{rec.id}\t{rec.info["SVTYPE"]}\t")
         fp.write(f"{tuple_to_str(rec.info['ALGORITHM'])}\t")
         fp.write(f"{tuple_to_str(rec.info['EVIDENCE'])}\t")
+        fp.write(f"{sid}\t")
         fp.write(f"{gt_to_str(rec.samples[sid]['GT'])}\t")
         fp.write(f"{tuple_to_str(rec.samples[sid]['EV'])}\t")
         fp.write(f"{tuple_to_str(rec.samples[sid]['GQ'])}\t")
