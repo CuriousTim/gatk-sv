@@ -2026,7 +2026,7 @@ task FlagOutliers {
       site_iqr_mult <- as.integer(argv[[2]])
       sample_iqr_mult <- as.integer(argv[[3]])
       dn <- read.table(argv[[1]], sep = "\t", header = TRUE)
-      dn_per_site <- table(dn$name)
+      dn_per_site <- table(dn$vid)
       dn_per_site_iqr <- IQR(dn_per_site)
       dn_per_site_iqr <- if (dn_per_site_iqr == 0) 1 else dn_per_site_iqr
       dn_per_sample <- table(dn$sample)
@@ -2036,7 +2036,7 @@ task FlagOutliers {
       max_dn_per_sample <- median(dn_per_sample) + dn_per_sample_iqr * sample_iqr_mult
       outlier_sites <- names(dn_per_site[dn_per_site > max_dn_per_site])
       outlier_samples <- names(dn_per_sample[dn_per_sample > max_dn_per_sample])
-      dn$outlier_site <- dn$name %in% outlier_sites
+      dn$outlier_site <- dn$vid %in% outlier_sites
       dn$outlier_sample <- dn$sample %in% outlier_samples
       dn[dn$outlier_site | dn$outlier_sample, "is_de_novo"] <- FALSE
       con <- gzfile("denovo_svs-outliers_flagged.tsv.gz", open = "wb")
