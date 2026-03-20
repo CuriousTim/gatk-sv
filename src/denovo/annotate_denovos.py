@@ -40,7 +40,7 @@ def tuple_to_str(x, sep=","):
 
 
 def gt_to_str(x):
-    return "/".join(("." if allele is None else str(x) for allele in x))
+    return "/".join("." if allele is None else str(allele) for allele in x)
 
 
 def tsv_reader(fp):
@@ -78,19 +78,19 @@ def write_site_annotations(fp, bcf_header, rec, carriers, ped):
         father, mother = ped[sid]
         fp.write(f"{rec.chrom}\t{rec.start}\t{rec.stop}\t{rec.info['SVLEN']}\t")
         fp.write(f"{tuple_to_str(rec.alts)}\t{rec.id}\t{rec.info["SVTYPE"]}\t")
-        fp.write(f"{rec.info["AF"]}\t{rec.info["AC"]}\t")
-        fp.write(f"{tuple_to_str(rec.info['ALGORITHM'])}\t")
+        fp.write(f"{rec.info["AF"][0]:.5f}\t{rec.info["AC"][0]}\t")
+        fp.write(f"{tuple_to_str(rec.info['ALGORITHMS'])}\t")
         fp.write(f"{tuple_to_str(rec.info['EVIDENCE'])}\t")
         fp.write(f"{sid}\t")
         fp.write(f"{gt_to_str(rec.samples[sid]['GT'])}\t")
         fp.write(f"{tuple_to_str(rec.samples[sid]['EV'])}\t")
-        fp.write(f"{tuple_to_str(rec.samples[sid]['GQ'])}\t")
+        fp.write(f"{rec.samples[sid]['GQ']}\t")
         fp.write(f"{gt_to_str(rec.samples[father]['GT'])}\t")
         fp.write(f"{tuple_to_str(rec.samples[father]['EV'])}\t")
-        fp.write(f"{tuple_to_str(rec.samples[father]['GQ'])}\t")
+        fp.write(f"{rec.samples[father]['GQ']}\t")
         fp.write(f"{gt_to_str(rec.samples[mother]['GT'])}\t")
         fp.write(f"{tuple_to_str(rec.samples[mother]['EV'])}\t")
-        fp.write(f"{tuple_to_str(rec.samples[mother]['GQ'])}\n")
+        fp.write(f"{rec.samples[mother]['GQ']}\n")
 
 
 def annotate(denovos, bcf, ped, output_path):
