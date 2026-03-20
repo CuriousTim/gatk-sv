@@ -2026,6 +2026,7 @@ task FlagOutliers {
       site_iqr_mult <- as.integer(argv[[2]])
       sample_iqr_mult <- as.integer(argv[[3]])
       dn <- read.table(argv[[1]], sep = "\t", header = TRUE)
+      dn$is_de_novo <- TRUE
       dn_per_site <- table(dn$vid)
       dn_per_site_iqr <- IQR(dn_per_site)
       dn_per_site_iqr <- if (dn_per_site_iqr == 0) 1 else dn_per_site_iqr
