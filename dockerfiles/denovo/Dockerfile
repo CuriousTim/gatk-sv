@@ -1,4 +1,4 @@
-ARG DUCKDB_VERSION="1.4.0"
+ARG DUCKDB_VERSION="1.5.0"
 ARG DUCKDB_URI="https://github.com/duckdb/duckdb/releases/download/v${DUCKDB_VERSION}/duckdb_cli-linux-amd64.zip"
 
 ARG BCFTOOLS_VERSION="1.23"

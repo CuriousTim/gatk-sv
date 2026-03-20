@@ -1943,21 +1943,30 @@ task AddGenomicContext {
     mv '~{denovos}' 'denovos.tsv.gz'
 
   cat > commands.sql <<EOF
+  CREATE MACRO read_repeats(x, rank) AS TABLE
+    SELECT vid, label, rank FROM
+    read_csv(x,
+      columns = {'vid': 'VARCHAR', 'label': 'VARCHAR'},
+      header = false,
+      delim = '\t',
+      auto_detect = false
+    );
   CREATE TABLE repeat_annot AS
-  SELECT vid, arg_min(label, rank) AS genomic_context FROM (
+  SELECT vid, arg_min(label, rank) AS genomic_context
+  FROM (
     SELECT vid, label, 1 AS rank
-    FROM read_csv('sd.tsv', names = ['vid', 'label'], header = false)
+    FROM read_repeats('sd.tsv', 1)
     UNION
     SELECT vid, label, 2 AS rank
-    FROM read_csv('rm.tsv', names = ['vid', 'label'], header = false)
+    FROM read_repeats('rm.tsv', 2)
     UNION
     SELECT vid, label, 3 AS rank
-    FROM read_csv('sr.tsv', names = ['vid', 'label'], header = false)
-  ) GROUP BY vid
+    FROM read_repeats('sr.tsv', 3)
+  ) GROUP BY vid;
 
   CREATE TABLE pc_annot AS
   SELECT vid, 1 AS ovp_pc_gene
-  FROM read_csv('pc.list', names = ['vid'], header = false);
+  FROM read_csv('pc.list', columns = {'vid': 'VARCHAR'}, header = false, delim = '\t', auto_detect = false);
 
   CREATE TABLE denovo AS
   SELECT * FROM
@@ -1971,7 +1980,7 @@ task AddGenomicContext {
   COPY denovo TO 'denovos_with_context.tsv.gz' (DELIMITER '\t');
 EOF
 
-  duckdb 'temp.duckdb' < commands.sql
+  duckdb -bail '.read commands.sql'
   >>>
 }
 
