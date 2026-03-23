@@ -37,6 +37,15 @@ def null_inherited_gt(header, rec, ped):
             or 1 in rec.samples[mother]["GT"]
         ):
             rec.samples[sid]["GT"] = (None, None)
+
+        # low GQ CNVs are generally unreliable
+        if (rec.info["SVTYPE"] == "DEL" or rec.info["SVTYPE"] == "DUP") and (
+            rec.samples[sid]["GQ"] == 0
+            or rec.samples[sid]["GQ"] == 0
+            or rec.samples[sid]["GQ"] == 0
+        ):
+            rec.samples[sid]["GT"] = (None, None)
+
     return rec
 
 
