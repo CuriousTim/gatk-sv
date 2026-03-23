@@ -1980,7 +1980,7 @@ task AddGenomicContext {
   COPY denovo TO 'denovos_with_context.tsv.gz' (DELIMITER '\t');
 EOF
 
-  duckdb -bail '.read commands.sql'
+  duckdb -echo -bail ':memory:' '.read commands.sql'
   >>>
 }
 
