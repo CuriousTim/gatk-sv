@@ -927,7 +927,7 @@ task ApplySiteFilters {
     bcftools view --include 'INFO/SVTYPE = "CPX" || INFO/SVTYPE = "CTX"' \
       --output-type z --output '~{cpx_vcf_name}' tmp.bcf
 
-    # Apply cohot AF and gnomAD AF filters
+    # Apply cohort AF and gnomAD AF filters
     bcftools view --drop-genotypes --output-type b --output sites_only.bcf non_cpx.bcf
     bcftools query --include 'AF > ~{max_cohort_af}' --format "${records_fmt}" sites_only.bcf \
       | awk -F'\t' '{print $0 "\tcohort_AF"}' > cohort_af_fail
