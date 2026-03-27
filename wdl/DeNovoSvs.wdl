@@ -945,14 +945,14 @@ task ApplySiteFilters {
 
     # Older GATK-SV VCFs have BOTHSIDES_SUPPORT and HIGH_SR_BACKGROUND in the
     # FILTER field while newer ones have it in the INFO field
-    if grep -qF '##INFO=<ID=BOTHSIDES_SUPPORT,' headers.txt; then
-      bothsides_filter='INFO/BOTHSIDES_SUPPORT = 1'
-    elif grep -qF '##FILTER=<ID=BOTHSIDES_SUPPORT,' headers.txt; then
-      bothsides_filter='FILTER ~ "BOTHSIDES_SUPPORT"'
-    else
-      printf 'BOTHSIDES_SUPPORT not found in BCF\n' >&2
-      exit 1
-    fi
+    # if grep -qF '##INFO=<ID=BOTHSIDES_SUPPORT,' headers.txt; then
+    #   bothsides_filter='INFO/BOTHSIDES_SUPPORT = 1'
+    # elif grep -qF '##FILTER=<ID=BOTHSIDES_SUPPORT,' headers.txt; then
+    #   bothsides_filter='FILTER ~ "BOTHSIDES_SUPPORT"'
+    # else
+    #   printf 'BOTHSIDES_SUPPORT not found in BCF\n' >&2
+    #   exit 1
+    # fi
     if grep -qF '##INFO=<ID=HIGH_SR_BACKGROUND,' headers.txt; then
       high_sr_filter='INFO/HIGH_SR_BACKGROUND = 1'
     elif grep -qF '##FILTER=<ID=HIGH_SR_BACKGROUND,' headers.txt; then
@@ -962,11 +962,11 @@ task ApplySiteFilters {
       exit 1
     fi
     # Apply BOTHSIDES_SUPPORT filter
-    bcftools view \
-      --include '(SVTYPE = "DEL" || SVTYPE = "DUP") && (EVIDENCE ~ "^RD,SR$" || EVIDENCE = "SR") && SVLEN < ~{large_cnv_size}' \
-      --output-type u sites_only.bcf \
-      | bcftools query --exclude "${bothsides_filter}" --format "${records_fmt}" \
-      | awk -F'\t' '{print $0 "\tsmall_sr_cnv"}' > bothsides_fail
+    # bcftools view \
+    #   --include '(SVTYPE = "DEL" || SVTYPE = "DUP") && (EVIDENCE ~ "^RD,SR$" || EVIDENCE = "SR") && SVLEN < ~{large_cnv_size}' \
+    #   --output-type u sites_only.bcf \
+    #   | bcftools query --exclude "${bothsides_filter}" --format "${records_fmt}" \
+    #   | awk -F'\t' '{print $0 "\tsmall_sr_cnv"}' > bothsides_fail
     # Apply small DUP, depth only filter
     bcftools query \
       --include 'SVTYPE = "DUP" && ALGORITHMS = "depth" && SVLEN < ~{depth_only_size}' \
@@ -1005,7 +1005,6 @@ task ApplySiteFilters {
       gd_fail \
       cohort_af_fail \
       gnomad_af_fail \
-      bothsides_fail \
       depth_only_fail \
       high_sr_fail \
       wham_fail \
