@@ -1873,6 +1873,7 @@ task GetSiteGenomicContext {
       | awk -F'\t' 'BEGIN{OFMT="%.0f"; OFS="\t"}
           NR==1{for(i=1;i<=NF;++i){a[$i]=i}}
           NR>1{print $(a["chr"]),$(a["start"]) - 1,$(a["end"]),$(a["vid"])}' \
+      | LC_ALL=C sort -u \
       | LC_ALL=C sort -k1,1 -k2,2n > sites.bed
     bedtools coverage -a sites.bed -b '~{rm}' -sorted \
       | awk -F'\t' '$8>=0.5{print $4,"RM"}' OFS='\t' > 'rm.tsv'
@@ -1881,7 +1882,8 @@ task GetSiteGenomicContext {
     bedtools coverage -a sites.bed -b '~{sd}' -sorted \
       | awk -F'\t' '$8>=0.5{print $4,"SD"}' OFS='\t' > 'sd.tsv'
     bedtools intersect -a sites.bed -b '~{pc_genes}' -sorted -u \
-      | cut -f 4 > 'pc.list'
+      | cut -f 4 \
+      | LC_ALL=C sort -u > 'pc.list'
   >>>
 }
 
