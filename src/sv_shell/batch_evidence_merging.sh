@@ -33,7 +33,7 @@ MergeEvidence() {
   printf "%s\n" "${_samples[@]}" > "${samples_file}"
 
   # Note that this piece has a few differences with the version in WDL.
-  #  - It does not support renaming or sub-setting contings are they are not needed for the single-sample pipeline.
+  #  - It does not support renaming or sub-setting contings as they are not needed for the single-sample pipeline.
   #  - It only indexes files if the file is missing an index.
   awk '/txt\.gz$/' "${evidence_file}" | while read fil; do
     if [ ! -f "${fil}.tbi" ]; then
@@ -68,7 +68,9 @@ SDtoBAF() {
   printf "%s\n" "${_samples[@]}" > "${samples_file}"
 
   awk '/txt\.gz$/' "${inputs_file}" | while read fil; do
-    tabix -f -s1 -b2 -e2 $fil
+    if [ ! -f "${fil}.tbi" ]; then
+      tabix -f -s1 -b2 -e2 $fil
+    fi
   done
 
   java "-Xmx${JVM_MAX_MEM}" -jar /opt/gatk.jar SiteDepthtoBAF \
@@ -93,7 +95,7 @@ output_dir=${3:-""}
 input_json="$(realpath ${input_json})"
 
 if [ -z "${output_dir}" ]; then
-  output_dir=$(mktemp -d /output_batch_evidence_merging_XXXXXXXX)
+  output_dir=$(mktemp -d ${SV_SHELL_BASE_DIR}/output_batch_evidence_merging_XXXXXXXX)
 else
   mkdir -p "${output_dir}"
 fi
@@ -105,7 +107,7 @@ else
   output_json_filename="$(realpath ${output_json_filename})"
 fi
 
-working_dir=$(mktemp -d /wd_batch_evidence_merging_XXXXXXXX)
+working_dir=$(mktemp -d ${SV_SHELL_BASE_DIR}/wd_batch_evidence_merging_XXXXXXXX)
 working_dir="$(realpath ${working_dir})"
 cd "${working_dir}"
 

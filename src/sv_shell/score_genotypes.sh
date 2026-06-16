@@ -3,6 +3,10 @@
 set -Exeuo pipefail
 
 
+if [ -z "${SV_SHELL_CLEAN_UP_WORKING_DIR:-}" ]; then
+  SV_SHELL_CLEAN_UP_WORKING_DIR=true
+fi
+
 # -------------------------------------------------------
 # ==================== Input & Setup ====================
 # -------------------------------------------------------
@@ -15,7 +19,7 @@ output_dir=${3:-""}
 input_json="$(realpath ${input_json})"
 
 if [ -z "${output_dir}" ]; then
-  output_dir=$(mktemp -d /output_score_genotypes_XXXXXXXX)
+  output_dir=$(mktemp -d ${SV_SHELL_BASE_DIR}/output_score_genotypes_XXXXXXXX)
 else
   mkdir -p "${output_dir}"
 fi
@@ -27,7 +31,7 @@ else
   output_json_filename="$(realpath ${output_json_filename})"
 fi
 
-working_dir=$(mktemp -d /wd_score_genotypes_XXXXXXXX)
+working_dir=$(mktemp -d ${SV_SHELL_BASE_DIR}/wd_score_genotypes_XXXXXXXX)
 working_dir="$(realpath ${working_dir})"
 cd "${working_dir}"
 echo "Filter Genotypes working directory: ${working_dir}"
@@ -58,7 +62,6 @@ echo "JVM memory: $JVM_MAX_MEM"
 # ======================= Command =======================
 # -------------------------------------------------------
 
-tabix -f "${vcf}"
 
 base_name=${vcf%.vcf.gz}
 base_name=${base_name%.vcf}
@@ -107,5 +110,9 @@ jq -n \
       unfiltered_recalibrated_vcf: $unfiltered_recalibrated_vcf,
       unfiltered_recalibrated_vcf_index: $unfiltered_recalibrated_vcf_index
   }' > "${output_json_filename}"
+
+if [ "${SV_SHELL_CLEAN_UP_WORKING_DIR}" == "true" ]; then
+  rm -rf "${working_dir}"
+fi
 
 echo "Finished Score Genotypes successfully, output json filename: ${output_json_filename}"

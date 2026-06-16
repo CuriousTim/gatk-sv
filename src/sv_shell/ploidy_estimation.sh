@@ -13,7 +13,7 @@ output_dir=${3:-""}
 input_json="$(realpath ${input_json})"
 
 if [ -z "${output_dir}" ]; then
-  output_dir=$(mktemp -d /output_ploidy_estimation_XXXXXXXX)
+  output_dir=$(mktemp -d ${SV_SHELL_BASE_DIR}/output_ploidy_estimation_XXXXXXXX)
 else
   mkdir -p "${output_dir}"
 fi
@@ -25,7 +25,7 @@ else
   output_json_filename="$(realpath ${output_json_filename})"
 fi
 
-working_dir=$(mktemp -d /wd_ploidy_estimation_XXXXXXXX)
+working_dir=$(mktemp -d ${SV_SHELL_BASE_DIR}/wd_ploidy_estimation_XXXXXXXX)
 working_dir="$(realpath ${working_dir})"
 cd "${working_dir}"
 
@@ -61,7 +61,7 @@ zcat "${bincov_matrix}" \
 mkdir ploidy_est
 Rscript /opt/WGD/bin/estimatePloidy.R -z -O ./ploidy_est "${ploidy_matrix}"
 
-python /opt/sv-pipeline/02_evidence_assessment/estimated_CN_denoising.py \
+python /opt/sv-pipeline/pre_SVCalling_and_QC/estimated_CN_denoising.py \
   --binwise-copy-number ./ploidy_est/binwise_estimated_copy_numbers.bed.gz \
   --estimated-copy-number ./ploidy_est/estimated_copy_numbers.txt.gz \
   --output-stats cn_denoising_stats.tsv \

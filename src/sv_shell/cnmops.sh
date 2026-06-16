@@ -19,13 +19,15 @@ JVM_MAX_MEM=$(getJavaMem MemTotal)
 echo "JVM memory: $JVM_MAX_MEM"
 
 
-function CNSampleNormal() {
+function CNSampleNormalArm() {
   local _chr=$1
   local _mode=$2
   local _r=$3
+  local _interval=${4:-${_chr}}
 
   echo "----------- Starting CN Sample Normal -------------"
   echo "chr: ${_chr}"
+  echo "interval: ${_interval}"
   echo "mode: ${_mode}"
   echo "r: ${_r}"
   echo "---------------------------------------------------"
@@ -33,7 +35,7 @@ function CNSampleNormal() {
   java "-Xmx${JVM_MAX_MEM}" -jar /opt/gatk.jar PrintSVEvidence \
     --sequence-dictionary "${ref_dict}" \
     --evidence-file "${bincov_matrix}" \
-    -L "${_chr}" \
+    -L "${_interval}" \
     -O "${_chr}.RD.txt"
 
   if [ "${_mode}" == "normal" ]; then
@@ -50,20 +52,52 @@ function CNSampleNormal() {
   EMPTY_OUTPUT_ERROR="No CNV regions in result object. Rerun cn.mops with different parameters!"
   set +e
   echo "Starting to run cnMOPS_workflow"
-  bash /opt/WGD/bin/cnMOPS_workflow.sh -S "${exclude_list}" -x "${exclude_list}" -r "${_r}" -o . -M "${_chr}.${_mode}.RD.txt" </dev/null wor2>&1 | tee cnmops.out
+  bash /opt/WGD/bin/cnMOPS_workflow.sh -S "${exclude_list}" -x "${exclude_list}" -r "${_r}" -o . -M "${_chr}.${_mode}.RD.txt" </dev/null 2>&1 | tee cnmops.out
   echo "Finished running cnMOPS_workflow"
   RC=$?
   set -e
-  if [ ! $RC -eq 0 ]; then
-    if grep -q "$EMPTY_OUTPUT_ERROR" "cnmops.out"; then
-      touch calls/cnMOPS.cnMOPS.gff
-    else
-      echo "cnMOPS_workflow.sh returned a non-zero code that was not due to an empty call file."
-      exit $RC
-    fi
+  if grep -q "$EMPTY_OUTPUT_ERROR" "cnmops.out"; then
+    echo "No CNV regions detected, creating empty GFF."
+    touch calls/cnMOPS.cnMOPS.gff
+  elif [ ! $RC -eq 0 ]; then
+    echo "cnMOPS_workflow.sh returned a non-zero code that was not due to an empty call file."
+    exit $RC
+  elif [ ! -f calls/cnMOPS.cnMOPS.gff ]; then
+    echo "cnMOPS_workflow.sh succeeded but did not produce calls/cnMOPS.cnMOPS.gff. Creating empty file."
+    touch calls/cnMOPS.cnMOPS.gff
   fi
 
   echo "----------- Finished CN Sample Normal -------------"
+}
+
+
+function CNSampleNormal() {
+  local _chr=$1
+  local _mode=$2
+  local _r=$3
+  local _parent_dir
+  _parent_dir=$(pwd)
+  local _arm_gffs=()
+
+  local _arm_idx=0
+  for _arm_range in $(awk -v chr="${_chr}" '$1 == chr {for(i=2;i<=NF;i++) print $i}' "${chr_arms_file}"); do
+    _arm_idx=$((_arm_idx + 1))
+    local _arm_dir="${_parent_dir}/arm_${_arm_idx}"
+    mkdir -p "${_arm_dir}"
+    cd "${_arm_dir}"
+
+    CNSampleNormalArm "${_chr}_arm${_arm_idx}" "${_mode}" "${_r}" "${_chr}:${_arm_range}"
+    _arm_gffs+=("${_arm_dir}/calls/cnMOPS.cnMOPS.gff")
+
+    cd "${_parent_dir}"
+  done
+
+  mkdir -p calls
+  if [ ${#_arm_gffs[@]} -gt 0 ]; then
+    cat "${_arm_gffs[@]}" > calls/cnMOPS.cnMOPS.gff
+  else
+    touch calls/cnMOPS.cnMOPS.gff
+  fi
 }
 
 
@@ -132,7 +166,7 @@ output_dir=${3:-""}
 input_json="$(realpath ${input_json})"
 
 if [ -z "${output_dir}" ]; then
-  output_dir=$(mktemp -d /output_batch_evidence_merging_XXXXXXXX)
+  output_dir=$(mktemp -d ${SV_SHELL_BASE_DIR}/output_batch_evidence_merging_XXXXXXXX)
 else
   mkdir -p "${output_dir}"
 fi
@@ -144,23 +178,24 @@ else
   output_json_filename="$(realpath ${output_json_filename})"
 fi
 
-working_dir=$(mktemp -d /wd_batch_evidence_merging_XXXXXXXX)
+working_dir=$(mktemp -d ${SV_SHELL_BASE_DIR}/wd_batch_evidence_merging_XXXXXXXX)
 working_dir="$(realpath ${working_dir})"
 cd "${working_dir}"
 echo "cnMOPS Working directory: ${working_dir}"
 
-batch=($(jq -r '.batch' "$input_json"))
-allo_file=($(jq -r '.allo_file' "$input_json"))
-chrom_file=($(jq -r '.chrom_file' "$input_json"))
-exclude_list=($(jq -r '.exclude_list' "$input_json"))
-ped_file=($(jq -r '.ped_file' "$input_json"))
-r1=($(jq -r '.r1' "$input_json"))
-r2=($(jq -r '.r2' "$input_json"))
-ref_dict=($(jq -r '.ref_dict' "$input_json"))
-bincov_matrix=($(jq -r '.bincov_matrix' "$input_json"))
-stitch_and_clean_large_events=($(jq -r '.stitch_and_clean_large_events' "$input_json"))
-min_size=($(jq -r '.min_size' "$input_json"))
-prefix=($(jq -r '.prefix' "$input_json"))
+batch=$(jq -r '.batch' "$input_json")
+allo_file=$(jq -r '.allo_file' "$input_json")
+chrom_file=$(jq -r '.chrom_file' "$input_json")
+exclude_list=$(jq -r '.exclude_list' "$input_json")
+ped_file=$(jq -r '.ped_file' "$input_json")
+r1=$(jq -r '.r1' "$input_json")
+r2=$(jq -r '.r2' "$input_json")
+ref_dict=$(jq -r '.ref_dict' "$input_json")
+bincov_matrix=$(jq -r '.bincov_matrix' "$input_json")
+stitch_and_clean_large_events=$(jq -r '.stitch_and_clean_large_events' "$input_json")
+min_size=$(jq -r '.min_size' "$input_json")
+prefix=$(jq -r '.prefix' "$input_json")
+cytobands=$(jq -r '.cytobands' "$input_json")
 
 
 # -------------------------------------------------------
@@ -168,19 +203,25 @@ prefix=($(jq -r '.prefix' "$input_json"))
 # -------------------------------------------------------
 
 
+# Get chr arms from cytobands
+# ---------------------------
+chr_arms_file=$(realpath "chr_arms.bed")
+python /opt/sv-pipeline/scripts/cytoband_to_arms.py -i "${cytobands}" -o "${chr_arms_file}"
+
+
 male_r1_gff=()
 male_r2_gff=()
 allos=($(awk '{print $1}' "${allo_file}"))
 for allo in "${allos[@]}"; do
   # Male R2
-  working_dir=$(mktemp -d /wd_cn_sample_normal_${allo}_${r2}_XXXXXXXX)
+  working_dir=$(mktemp -d ${SV_SHELL_BASE_DIR}/wd_cn_sample_normal_${allo}_${r2}_XXXXXXXX)
   working_dir="$(realpath ${working_dir})"
   cd "${working_dir}"
   CNSampleNormal "${allo}" "1" "${r2}"
   male_r2_gff+=("${working_dir}/calls/cnMOPS.cnMOPS.gff")
 
   # Male R1
-  working_dir=$(mktemp -d /wd_cn_sample_normal_${allo}_${r1}_XXXXXXXX)
+  working_dir=$(mktemp -d ${SV_SHELL_BASE_DIR}/wd_cn_sample_normal_${allo}_${r1}_XXXXXXXX)
   working_dir="$(realpath ${working_dir})"
   cd "${working_dir}"
   CNSampleNormal "${allo}" "1" "${r1}"
@@ -192,14 +233,14 @@ normal_r2_gff=()
 chroms=($(awk '{print $1}' "${chrom_file}"))
 for chrom in "${chroms[@]}"; do
   # Normal R2
-  working_dir=$(mktemp -d /wd_cn_sample_normal_${chrom}_${r2}_XXXXXXXX)
+  working_dir=$(mktemp -d ${SV_SHELL_BASE_DIR}/wd_cn_sample_normal_${chrom}_${r2}_XXXXXXXX)
   working_dir="$(realpath ${working_dir})"
   cd "${working_dir}"
   CNSampleNormal "${chrom}" "normal" "${r2}"
   normal_r2_gff+=("${working_dir}/calls/cnMOPS.cnMOPS.gff")
 
   # Normal R1
-  working_dir=$(mktemp -d /wd_cn_sample_normal_${chrom}_${r1}_XXXXXXXX)
+  working_dir=$(mktemp -d ${SV_SHELL_BASE_DIR}/wd_cn_sample_normal_${chrom}_${r1}_XXXXXXXX)
   working_dir="$(realpath ${working_dir})"
   cd "${working_dir}"
   CNSampleNormal "${chrom}" "normal" "${r1}"
@@ -208,14 +249,14 @@ done
 
 
 # Female R2
-working_dir=$(mktemp -d /wd_cn_sample_normal_chrX_${r2}_XXXXXXXX)
+working_dir=$(mktemp -d ${SV_SHELL_BASE_DIR}/wd_cn_sample_normal_chrX_${r2}_XXXXXXXX)
 working_dir="$(realpath ${working_dir})"
 cd "${working_dir}"
 CNSampleNormal "chrX" "2" "${r2}"
 female_r2_gff=("${working_dir}/calls/cnMOPS.cnMOPS.gff")
 
 # Female R1
-working_dir=$(mktemp -d /wd_cn_sample_normal_chrX_${r1}_XXXXXXXX)
+working_dir=$(mktemp -d ${SV_SHELL_BASE_DIR}/wd_cn_sample_normal_chrX_${r1}_XXXXXXXX)
 working_dir="$(realpath ${working_dir})"
 cd "${working_dir}"
 CNSampleNormal "chrX" "2" "${r1}"
@@ -223,7 +264,7 @@ female_r1_gff=("${working_dir}/calls/cnMOPS.cnMOPS.gff")
 
 
 # CleanCNMops
-working_dir=$(mktemp -d /wd_clean_cnmops_XXXXXXXX)
+working_dir=$(mktemp -d ${SV_SHELL_BASE_DIR}/wd_clean_cnmops_XXXXXXXX)
 working_dir="$(realpath ${working_dir})"
 cd "${working_dir}"
 

@@ -10,6 +10,7 @@ workflow StripyWorkflow {
         File ped_file
         String? genome_build
         File reference_fasta
+        File reference_fasta_fai
         String sample_name
         String? locus
         File? custom_catalog
@@ -39,6 +40,7 @@ workflow StripyWorkflow {
             bam_or_cram_index = bam_or_cram_index_,
             genome_build = genome_build,
             reference_fasta = reference_fasta,
+            reference_fasta_fai = reference_fasta_fai,
             sample_name = sample_name,
             locus = locus,
             sex = GetSampleSex.out_string,
@@ -51,10 +53,10 @@ workflow StripyWorkflow {
     }
 
     output {
-        File json_output = RunStripy.json_output
-        File tsv_output = RunStripy.tsv_output
-        File html_output = RunStripy.html_output
-        File? vcf_output = RunStripy.vcf_output
+        File stripy_json = RunStripy.json_output
+        File stripy_tsv = RunStripy.tsv_output
+        File stripy_html = RunStripy.html_output
+        File? stripy_vcf = RunStripy.vcf_output
     }
 }
 
@@ -64,6 +66,7 @@ task RunStripy {
         File bam_or_cram_index
         String genome_build = "hg38"
         File reference_fasta
+        File reference_fasta_fai
         String sample_name
         String locus = "AFF2,AR,ARX_1,ARX_2,ATN1,ATXN1,ATXN10,ATXN2,ATXN3,ATXN7,ATXN8OS,BEAN1,C9ORF72,CACNA1A,CBL,CNBP,COMP,DAB1,DIP2B,DMD,DMPK,FGF14,FMR1,FOXL2,FXN,GIPC1,GLS,HOXA13_1,HOXA13_2,HOXA13_3,HOXD13,HTT,JPH3,LRP12,MARCHF6,NIPA1,NOP56,NOTCH2NLC,NUTM2B-AS1,PABPN1,PHOX2B,PPP2R2B,PRDM12,RAPGEF2,RFC1,RILPL1,RUNX2,SAMD12,SOX3,STARD7,TBP,TBX1,TCF4,TNRC6A,XYLT1,YEATS2,ZIC2,ZIC3"
         String? sex
@@ -91,22 +94,34 @@ task RunStripy {
                                }
     RuntimeAttr runtime_attr = select_first([runtime_attr_override, default_attr])
 
-    String bam_filename = basename(bam_or_cram_file)
-    String bam_base_default = sub(bam_filename, "\\\.[^.]+$", "")
-
     String json_path = output_dir + "/" + sample_name + ".json"
     String tsv_path = output_dir + "/" + sample_name + ".tsv"
     String html_path = output_dir + "/" + sample_name + ".html"
     String vcf_path = output_dir + "/" + sample_name + ".vcf"
+    String input_filename = basename(bam_or_cram_file)
+    Boolean input_is_bam = basename(bam_or_cram_file, ".bam") + ".bam" == basename(bam_or_cram_file)
+    String staged_index_filename = input_filename + if input_is_bam then ".bai" else ".crai"
+    String staged_reference_fasta = basename(reference_fasta)
+    String staged_reference_fai = staged_reference_fasta + ".fai"
 
     command <<<
         # Run STRipy pipeline using our wrapper
         set -euxo pipefail
         mkdir -p ~{output_dir}
+
+        # STRipy expects the BAM/CRAM index to live beside the input file.
+        ln -s ~{bam_or_cram_file} ~{input_filename}
+        ln -s ~{bam_or_cram_index} ~{staged_index_filename}
+
+        # pysam.FastaFile expects the FASTA index beside the localized reference path.
+        ln -s ~{reference_fasta} ~{staged_reference_fasta}
+        ln -s ~{reference_fasta_fai} ~{staged_reference_fai}
+
         stripy \
-            --input ~{bam_or_cram_file} \
+            --input ~{input_filename} \
+            --sample-name ~{sample_name} \
             --genome ~{genome_build} \
-            --reference ~{reference_fasta} \
+            --reference ~{staged_reference_fasta} \
             --output ~{output_dir} \
             --analysis ~{analysis} \
             --output-json true \
@@ -119,26 +134,6 @@ task RunStripy {
             ~{if defined(locus) then "--locus " + locus else ""} \
             ~{if defined(sex) then "--sex " + sex else ""} \
             ~{if defined(custom_catalog) then "--custom " + custom_catalog else ""}
-
-        ACTUAL_FILENAME=$(basename "~{bam_or_cram_file}")
-        ACTUAL_BASE=$(echo "${ACTUAL_FILENAME}" | sed 's/\.[^.]*$//')
-        TARGET_BASE='~{sample_name}'
-        echo "ACTUAL_FILENAME: ${ACTUAL_FILENAME}"
-        echo "ACTUAL_BASE: ${ACTUAL_BASE}"
-        echo "TARGET_BASE: ${TARGET_BASE}"
-        ls ~{output_dir}
-        if [ -f "~{output_dir}/${ACTUAL_FILENAME}.json" ]; then
-            mv "~{output_dir}/${ACTUAL_FILENAME}.json" "~{output_dir}/${TARGET_BASE}.json"
-        fi
-        if [ -f "~{output_dir}/${ACTUAL_FILENAME}.tsv" ]; then
-            mv "~{output_dir}/${ACTUAL_FILENAME}.tsv" "~{output_dir}/${TARGET_BASE}.tsv"
-        fi
-        if [ -f "~{output_dir}/${ACTUAL_FILENAME}.html" ]; then
-            mv "~{output_dir}/${ACTUAL_FILENAME}.html" "~{output_dir}/${TARGET_BASE}.html"
-        fi
-        if [ -f "~{output_dir}/${ACTUAL_BASE}.vcf" ]; then
-            mv "~{output_dir}/${ACTUAL_BASE}.vcf" "~{output_dir}/${TARGET_BASE}.vcf"
-        fi
     >>>
 
     runtime {
